@@ -1,0 +1,8 @@
+*.o
+*.so
+.#*
+.ycm*
+*.vim
+vgcore*
+TESTDB/
+testCases/test?
