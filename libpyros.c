@@ -1161,12 +1161,12 @@ Get_Aliased_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
 
 PyrosList *
 Get_Children_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
-	return getExtIds(pyrosDB,tag,TAG_TYPE_PARENT,TAG_TYPE_CHILD);
+	return getExtIds(pyrosDB,tag,TAG_TYPE_CHILD,TAG_TYPE_PARENT);
 }
 
 PyrosList *
 Get_Parent_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
-	return getExtIds(pyrosDB,tag,TAG_TYPE_CHILD,TAG_TYPE_PARENT);
+	return getExtIds(pyrosDB,tag,TAG_TYPE_PARENT,TAG_TYPE_CHILD);
 }
 
 PyrosList *
