@@ -5,7 +5,7 @@ File tagging system for managing a large collection of files
 * [Pyros-Qt]
 * [Pyros-CLI]
 
-## Dependancies
+## Dependencies
 * SQLite
 * libCrypto (for file hashing)
 * libmagic (for mimetypes)
