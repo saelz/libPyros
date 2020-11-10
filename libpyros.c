@@ -1536,7 +1536,7 @@ Pyros_Add_Parent(PyrosDB *pyrosDB, const char *child, const char *parent){
 }
 void
 Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child){
-	Add_Family_Ext(pyrosDB,TAG_TYPE_CHILD,child,parent);
+	Add_Family_Ext(pyrosDB,TAG_TYPE_PARENT,parent,child);
 }
 void
 Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash, const char *tag){
