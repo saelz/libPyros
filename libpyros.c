@@ -979,7 +979,7 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 			strcat(cmd,"hash");
 			break;
 		case OT_MIME:
-			strcat(cmd,"mime");
+			strcat(cmd,"mimetype");
 			break;
 		case OT_TIME:
 			strcat(cmd,"import_time");
