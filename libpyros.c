@@ -1075,11 +1075,11 @@ Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash, int showExt)
 	for (i = 0; i < tags->length; i++) {
 		if (showExt){
 			PyrosStrListMerge(tags,Get_Aliased_Ids(pyrosDB,tags->list[i]));
-			PyrosStrListMerge(tags,Get_Children_Ids(pyrosDB,tags->list[i]));
+			PyrosStrListMerge(tags,Get_Parent_Ids(pyrosDB,tags->list[i]));
 		}
 		cmdlength += 3;
 	}
-	/* BAD MALLOC */
+	
 	cmd = malloc(sizeof(*cmd)*cmdlength);
 	strcpy(cmd,"SELECT tag FROM tag WHERE  id IN (");
 
@@ -1682,7 +1682,7 @@ void
 Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2){
 	PyrosList *tags;
 
-	tags = Pyros_Get_Tags_From_Hash_Simple(pyrosDB, hash1, TRUE);
+	tags = Pyros_Get_Tags_From_Hash_Simple(pyrosDB, hash1, FALSE);
 	if (tags != NULL){
 		Pyros_Add_Tag(pyrosDB, hash2,(char**)tags->list, tags->length);
 	}
