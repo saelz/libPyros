@@ -38,8 +38,8 @@ enum Order_Type{
 
 enum Tag_Ext{
 	TAG_TYPE_ALIAS,
-	TAG_TYPE_CHILD,
 	TAG_TYPE_PARENT,
+	TAG_TYPE_CHILD,
 };
 
 typedef struct PyrosMeta{
