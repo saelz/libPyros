@@ -1513,10 +1513,10 @@ Add_Family_Ext(PyrosDB *pyrosDB,int type, const char *tag1, const char *tag2){
 		} else{
 			switch (type){
 			case TAG_TYPE_CHILD:
-				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_CHILD);
+				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_PARENT);
 				break;
 			case TAG_TYPE_PARENT:
-				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_PARENT);
+				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_CHILD);
 				break;
 			case TAG_TYPE_ALIAS:
 				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_ALIAS);
@@ -1532,11 +1532,11 @@ Pyros_Add_Alias(PyrosDB *pyrosDB, const char *tag1,const char *tag2){
 
 void
 Pyros_Add_Parent(PyrosDB *pyrosDB, const char *child, const char *parent){
-	Add_Family_Ext(pyrosDB,TAG_TYPE_CHILD,child,parent);
+	Add_Family_Ext(pyrosDB,TAG_TYPE_PARENT,child,parent);
 }
 void
 Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child){
-	Add_Family_Ext(pyrosDB,TAG_TYPE_PARENT,parent,child);
+	Add_Family_Ext(pyrosDB,TAG_TYPE_CHILD,parent,child);
 }
 void
 Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash, const char *tag){
