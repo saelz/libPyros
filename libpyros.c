@@ -19,6 +19,7 @@
 #define FILEBUFSIZE 6000
 
 static PyrosList *getStructuredTags(PyrosDB *pyrosDB,PyrosList *tagids,unsigned int flags);
+static void mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,PyrosList *tagids,PyrosList *ptaglist,const char *glob);
 
 static void
 importFile( char *file,char *path){
@@ -1105,6 +1106,7 @@ Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash, int showExt)
 PyrosList *
 Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 	PyrosList *tags;
+	PyrosList *structured_tags;
 
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
@@ -1121,7 +1123,10 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 	if (tags == NULL)
 		return NULL;
 
-	return getStructuredTags(pyrosDB,tags,PYROS_FILE_EXT);
+	structured_tags = getStructuredTags(pyrosDB,tags,PYROS_FILE_EXT);
+	mergeTagidsIntoPyrosTagList(pyrosDB,tags,structured_tags,NULL);
+	Pyros_List_Free(tags,free);
+	return structured_tags;
 }
 
 PyrosList *
@@ -1346,23 +1351,56 @@ Pyros_Free_Tag(PyrosTag* tag){
 	free(tag);
 }
 
+static void
+mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,PyrosList *tagids,PyrosList *ptaglist,const char *glob){
+	sqlite3_stmt *Get_Ext_Tags;
+	PyrosTag *currentTag;
+
+	if (tagids->length == 0)
+		return;
+
+	sqlPrepareStmt(pyrosDB,"SELECT tag FROM tag WHERE id=?;",&Get_Ext_Tags);
+
+	for (size_t i = 0; i < tagids->length; i++){
+		currentTag = ((PyrosTag*)ptaglist->list[i]);
+		if (i == 0 && glob != NULL){
+			char *copy;
+			copy = malloc(strlen(glob)+1);
+			strcpy(copy, glob);
+			currentTag->tag = copy;
+		} else {
+			sqlBind(Get_Ext_Tags,FALSE,1,SQL_INT64P,tagids->list[i]);
+			sqlStmtGet(Get_Ext_Tags,1,SQL_CHAR,&currentTag->tag);
+		}
+	}
+
+	sqlite3_finalize(Get_Ext_Tags);
+
+}
+
 static PyrosList *
 getStructuredTags(PyrosDB *pyrosDB,PyrosList *tagids,unsigned int flags){
 	PyrosList *structured_tags;
 	size_t i;
-	PyrosTag *currentTag;
 	size_t lastlength;
-	sqlite3_stmt *Get_Ext_Tags;
 
 	structured_tags = Pyros_Create_List(1,sizeof(PyrosTag*));
+	if (tagids->length < 1){
+		return structured_tags;
+	}
 
-	for (i = 0; i < tagids->length; i++)
+	if (flags & PYROS_GLOB){
 		Pyros_List_Append(structured_tags,newPyrosTag(FALSE,-1));
+		for (i = 1; i < tagids->length; i++)
+			Pyros_List_Append(structured_tags,newPyrosTag(FALSE,0));
+	} else {
+		for (i = 0; i < tagids->length; i++)
+			Pyros_List_Append(structured_tags,newPyrosTag(FALSE,-1));
+	}
 
 	lastlength = tagids->length;
 
 	for (i = 0; i < tagids->length; i++){
-
 		if (flags & PYROS_ALIAS){
 			PyrosListMerge(tagids,Get_Aliased_Ids(pyrosDB,tagids->list[i]));
 			while (lastlength < tagids->length){
@@ -1384,25 +1422,16 @@ getStructuredTags(PyrosDB *pyrosDB,PyrosList *tagids,unsigned int flags){
 				lastlength++;
 			}
 		}
+
 	}
-	sqlPrepareStmt(pyrosDB,"SELECT tag FROM tag WHERE id=?;",&Get_Ext_Tags);
-
-	for (i = 0; i < tagids->length; i++){
-		currentTag = ((PyrosTag*)structured_tags->list[i]);
-		sqlBind(Get_Ext_Tags,FALSE,1,SQL_INT64P,tagids->list[i]);
-		sqlStmtGet(Get_Ext_Tags,1,SQL_CHAR,&currentTag->tag);
-	}
-
-	Pyros_List_Free(tagids,free);
-	sqlite3_finalize(Get_Ext_Tags);
-
 	return structured_tags;
-
 }
+
 
 PyrosList *
 Pyros_Get_Ext_Tags_Structured(PyrosDB *pyrosDB, const char *tag,unsigned int flags){
 	PyrosList *tagids;
+	PyrosList *structured_tags;
 	sqlite3_int64 *tagid = NULL;
 
 
@@ -1416,7 +1445,11 @@ Pyros_Get_Ext_Tags_Structured(PyrosDB *pyrosDB, const char *tag,unsigned int fla
 		else
 			return tagids;
 	}
-	return getStructuredTags(pyrosDB,tagids,flags);
+
+	structured_tags = getStructuredTags(pyrosDB,tagids,flags);
+	mergeTagidsIntoPyrosTagList(pyrosDB,tagids,structured_tags,tag);
+	Pyros_List_Free(tagids,free);
+	return structured_tags;
 }
 
 PyrosList *
