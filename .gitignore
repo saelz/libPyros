@@ -4,5 +4,4 @@
 .ycm*
 *.vim
 vgcore*
-TESTDB/
-testCases/test?
+.ccls-cache/
