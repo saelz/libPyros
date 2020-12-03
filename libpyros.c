@@ -1261,11 +1261,15 @@ PyrosList *
 Pyros_Get_Aliases(PyrosDB *pyrosDB, const char *tag){
 	return GetExtTags(pyrosDB,tag,&Get_Aliased_Ids);
 }
-
+PyrosList *
+Pyros_Get_Parents(PyrosDB *pyrosDB, const char *tag){
+	return GetExtTags(pyrosDB,tag,&Get_Parent_Ids);
+}
 PyrosList *
 Pyros_Get_Children(PyrosDB *pyrosDB, const char *tag){
 	return GetExtTags(pyrosDB,tag,&Get_Children_Ids);
 }
+
 
 
 PyrosFile *
