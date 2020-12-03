@@ -1,7 +1,7 @@
 #ifndef PYROS_SQL_H
 #define PYROS_SQL_H
 
-#include "libpyros.h"
+#include "search.h"
 
 #include <sqlite3.h>
 
@@ -61,4 +61,7 @@ int sqlBindTags(sqlite3_stmt *stmt,PrcsTags *prcsTags, size_t tagc,
 int sqlStmtGet(sqlite3_stmt *stmt, size_t args, ...);
 PyrosList *sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt);
 PyrosList *sqlStmtGetAll(sqlite3_stmt *stmt,enum SQL_GET_TYPE);
+
+void sqlStartTransaction(PyrosDB *pyrosDB);
+void sqlCompileStmt(PyrosDB *db, enum COMMAND_STMTS stmt,char *cmd);
 #endif

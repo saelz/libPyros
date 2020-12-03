@@ -7,7 +7,7 @@ CFLAGS=$(WARNING) -std=c99 -fPIC -pedantic
 
 LDFLAGS=$(LIBS) -shared
 
-SRC=libpyros.c sqlite.c pyroslist.c hash.c str.c
+SRC=database.c sqlite.c pyroslist.c hash.c str.c tagging.c search.c files.c
 OBJS=$(SRC:.c=.o)
 
 LIBPATH = /usr/lib64

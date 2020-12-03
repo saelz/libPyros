@@ -3,10 +3,10 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "libpyros.h"
 #include "pyros.h"
 #include "str.h"
 #include "sqlite.h"
+#include "libpyros.h"
 
 sqlite3*
 initDB(const char *database,int isNew){
@@ -39,7 +39,6 @@ sqlPrepareStmt(PyrosDB *pyrosDB,char *cmd,sqlite3_stmt **stmt){
 
 	rc = sqlite3_prepare_v2(pyrosDB->database,cmd,-1, stmt, NULL);
 	if (rc != SQLITE_OK) {
-		//pyrosDB->err = strMk(2,"SQL:",sqlite3_errmsg(pyrosDB->database));
 		fprintf(stderr,"Pyros: SQLite ERROR %d in \"%s\"\n",rc,cmd);
 		sqlite3_finalize(*stmt);
 		return PYROS_DB_ERR;
@@ -271,4 +270,20 @@ sqlStmtGetAll(sqlite3_stmt *stmt,enum SQL_GET_TYPE type){
 	//sqlite3_finalize(stmt);
 	sqlite3_reset(stmt);
 	return items;
+}
+
+void
+sqlStartTransaction(PyrosDB *pyrosDB){
+	sqlite3_stmt **stmts = pyrosDB->commands;
+	if (!pyrosDB->inTransaction){
+		sqlStmtGet(stmts[STMT_BEGIN],0);
+		pyrosDB->inTransaction = TRUE;
+	}
+}
+
+void
+sqlCompileStmt(PyrosDB *pyrosDB, enum COMMAND_STMTS stmt,char *cmd){
+	sqlite3_stmt **stmts = pyrosDB->commands;
+	if (stmts[stmt] == NULL)
+		sqlPrepareStmt(pyrosDB,cmd, &stmts[stmt]);
 }
