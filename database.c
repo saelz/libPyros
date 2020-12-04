@@ -152,7 +152,7 @@ Pyros_Close_Database(PyrosDB *pyrosDB){
 }
 
 int
-Pyros_Execute(PyrosDB *pyrosDB){
+Pyros_Commit(PyrosDB *pyrosDB){
 	PyrosHook *hook;
 	int ret = PYROS_OK;
 	size_t i;

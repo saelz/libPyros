@@ -367,7 +367,7 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 	sqlCompileStmt(pyrosDB,STMT_REMOVE_FILE,
 				   "DELETE FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r ');");
 
-	Pyros_Remove_Tags_From_Hash(pyrosDB, pFile->hash);
+	Pyros_Remove_All_Tags_From_Hash(pyrosDB, pFile->hash);
 
 	sqlBind(stmts[STMT_REMOVE_FILE],TRUE,1,
 			SQL_CHAR,pFile->hash);
@@ -383,7 +383,7 @@ Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2){
 
 	Pyros_Copy_Tags(pyrosDB,hash2,masterHash);
 
-	Pyros_Remove_Tags_From_Hash(pyrosDB, hash2);
+	Pyros_Remove_All_Tags_From_Hash(pyrosDB, hash2);
 
 	sqlCompileStmt(pyrosDB,STMT_MERGE_HASH,
 				   "UPDATE hashes SET hash=? WHERE hash=?");

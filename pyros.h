@@ -28,13 +28,13 @@ enum PYROS_HASHTYPE{
 	PYROS_BLAKE2SHASH
 };
 
-enum Pyros_EXT_FLAGS{
+enum PYROS_TAG_RELATION_FLAGS{
 	PYROS_CHILD    = 0x0001,
 	PYROS_PARENT   = 0x0010,
 	PYROS_ALIAS    = 0x0100,
 	PYROS_GLOB     = 0x1000,
-	PYROS_FILE_EXT = PYROS_ALIAS|PYROS_PARENT,
-	PYROS_TAG_EXT  = PYROS_ALIAS|PYROS_CHILD|PYROS_GLOB,
+	PYROS_FILE_RELATIONSHIP   = PYROS_ALIAS|PYROS_PARENT,
+	PYROS_SEARCH_RELATIONSHIP = PYROS_ALIAS|PYROS_CHILD|PYROS_GLOB,
 };
 
 typedef struct PyrosList{
@@ -84,7 +84,7 @@ PyrosDB *Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype);
 PyrosDB *Pyros_Open_Database(const char *path);
 void Pyros_Close_Database(PyrosDB *pyrosDB);
 int Pyros_Database_Exists(const char *path);
-int Pyros_Execute(PyrosDB *pyrosDB);
+int Pyros_Commit(PyrosDB *pyrosDB);
 
 /* PyrosFile functions */
 void Pyros_Close_File(PyrosFile *pFile);
@@ -108,7 +108,8 @@ PyrosList *Pyros_Get_All_Hashes(PyrosDB *pyrosDB);
 PyrosList *Pyros_Get_All_Tags(PyrosDB *pyrosDB);
 
 PyrosList *Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash);
-PyrosList *Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash, int showExt);
+PyrosList *Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
+										   int showRelated);
 PyrosList *Pyros_Get_Aliases(PyrosDB *pyrosDB, const char *tag);
 PyrosList *Pyros_Get_Parents(PyrosDB *pyrosDB, const char *tag);
 PyrosList *Pyros_Get_Children(PyrosDB *pyrosDB,const char *tag);
@@ -117,20 +118,24 @@ PyrosFile *Pyros_Get_File_From_Hash(PyrosDB *pyrosDB, const char *hash);
 int Pyros_Get_File_Count(PyrosDB *pyrosDB);
 int Pyros_Get_Tag_Count(PyrosDB *pyrosDB);
 
-/* ext. tag functions*/
+/* tag relationship functions*/
 
-PyrosList *Pyros_Get_Ext_Tags_Structured(PyrosDB *pyrosDB, const char *tag,
+PyrosList *Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *tag,
 										 unsigned int flags);
-PyrosList *Pyros_Get_Ext_Tags(PyrosDB *pyrosDB,const char *tag, int getChildren,int ignoreGlobs);
+PyrosList *Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB,const char *tag,
+										 int getChildren,int ignoreGlobs);
 void Pyros_Add_Alias(PyrosDB *pyrosDB, const char *tag, const char *alias);
 void Pyros_Add_Parent(PyrosDB *pyrosDB, const char *child, const char *parent);
 void Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child);
 
 /* remove functions */
-void Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash, const char *tag);
-void Pyros_Remove_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash);
+void Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash,
+								const char *tag);
+void Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB,
+									 const char *hash);
 void Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile);
-void Pyros_Remove_Ext_Tag(PyrosDB *pyrosDB, const char *tag1, const char *tag2);
+void Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
+								   const char *tag2);
 void Pyros_Remove_Dead_Tags(PyrosDB *pyrosDB);
 
 void Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2);

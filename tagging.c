@@ -7,7 +7,7 @@
 #include "sqlite.h"
 #include "libpyros.h"
 
-enum Tag_Ext{
+enum Tag_Relation_Type{
 	TAG_TYPE_ALIAS,
 	TAG_TYPE_PARENT,
 	TAG_TYPE_CHILD,
@@ -68,13 +68,13 @@ newPyrosTag(int isAlias,int parent){
 static void
 mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,PyrosList *tagids,
 							PyrosList *ptaglist,const char *glob){
-	sqlite3_stmt *Get_Ext_Tags;
+	sqlite3_stmt *Get_Relation_Tags;
 	PyrosTag *currentTag;
 
 	if (tagids->length == 0)
 		return;
 
-	sqlPrepareStmt(pyrosDB,"SELECT tag FROM tag WHERE id=?;",&Get_Ext_Tags);
+	sqlPrepareStmt(pyrosDB,"SELECT tag FROM tag WHERE id=?;",&Get_Relation_Tags);
 
 	for (size_t i = 0; i < tagids->length; i++){
 		currentTag = ((PyrosTag*)ptaglist->list[i]);
@@ -84,12 +84,12 @@ mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,PyrosList *tagids,
 			strcpy(copy, glob);
 			currentTag->tag = copy;
 		} else {
-			sqlBind(Get_Ext_Tags,FALSE,1,SQL_INT64P,tagids->list[i]);
-			sqlStmtGet(Get_Ext_Tags,1,SQL_CHAR,&currentTag->tag);
+			sqlBind(Get_Relation_Tags,FALSE,1,SQL_INT64P,tagids->list[i]);
+			sqlStmtGet(Get_Relation_Tags,1,SQL_CHAR,&currentTag->tag);
 		}
 	}
 
-	sqlite3_finalize(Get_Ext_Tags);
+	sqlite3_finalize(Get_Relation_Tags);
 
 }
 
@@ -144,7 +144,7 @@ getStructuredTags(PyrosDB *pyrosDB,PyrosList *tagids,unsigned int flags){
 
 
 PyrosList *
-Pyros_Get_Ext_Tags_Structured(PyrosDB *pyrosDB, const char *tag,unsigned int flags){
+Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *tag,unsigned int flags){
 	PyrosList *tagids;
 	PyrosList *structured_tags;
 	sqlite3_int64 *tagid = NULL;
@@ -168,14 +168,14 @@ Pyros_Get_Ext_Tags_Structured(PyrosDB *pyrosDB, const char *tag,unsigned int fla
 }
 
 PyrosList *
-Pyros_Get_Ext_Tags(PyrosDB *pyrosDB,const char *tag, int showChildren,
+Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB,const char *tag, int showChildren,
 				   int ignoreGlobs){
 	PyrosList *tagids;
 	sqlite3_int64 *tagid = NULL;
 	size_t i;
 	PyrosList *tags;
 	char *cmd;
-	sqlite3_stmt *Get_Ext_Tags;
+	sqlite3_stmt *Get_Relation_Tags;
 
 	if (!ignoreGlobs && containsGlobChar(tag)){
 		tagids = getTagIdByGlob(pyrosDB,tag);
@@ -206,31 +206,31 @@ Pyros_Get_Ext_Tags(PyrosDB *pyrosDB,const char *tag, int showChildren,
 
 	}
 	strcat(cmd,");");
-	sqlPrepareStmt(pyrosDB,cmd,&Get_Ext_Tags);
+	sqlPrepareStmt(pyrosDB,cmd,&Get_Relation_Tags);
 
-	sqlBindList(Get_Ext_Tags,tagids,SQL_INT64P);
-	tags = sqlStmtGetAll(Get_Ext_Tags,SQL_CHAR);
+	sqlBindList(Get_Relation_Tags,tagids,SQL_INT64P);
+	tags = sqlStmtGetAll(Get_Relation_Tags,SQL_CHAR);
 
 	free(cmd);
 	Pyros_List_Free(tagids,free);
-	sqlite3_finalize(Get_Ext_Tags);
+	sqlite3_finalize(Get_Relation_Tags);
 
 	return tags;
 }
 
 void
-Pyros_Add_Ext(PyrosDB *pyrosDB,const char *tag1, const char *tag2, int type){
+Pyros_Add_Relation(PyrosDB *pyrosDB,const char *tag1, const char *tag2, int type){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB, STMT_ADD_EXT,
+	sqlCompileStmt(pyrosDB, STMT_ADD_RELATION,
 				   "INSERT OR IGNORE INTO tagrelations "
 				   "VALUES((SELECT id FROM tag WHERE tag=?),"
 				    "(SELECT id FROM tag WHERE tag=?),?);");
 
 
-	sqlBind(stmts[STMT_ADD_EXT],TRUE,3,
+	sqlBind(stmts[STMT_ADD_RELATION],TRUE,3,
 			SQL_CHAR,tag1,
 			SQL_CHAR,tag2,
 			SQL_INT,type);
@@ -256,17 +256,17 @@ addTagRelation(PyrosDB *pyrosDB,int type, const char *tag1, const char *tag2){
 		createTag(pyrosDB,tag1);
 		createTag(pyrosDB,tag2);
 		if (cmp > 0){
-			Pyros_Add_Ext(pyrosDB,tag1,tag2,type);
+			Pyros_Add_Relation(pyrosDB,tag1,tag2,type);
 		} else{
 			switch (type){
 			case TAG_TYPE_CHILD:
-				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_PARENT);
+				Pyros_Add_Relation(pyrosDB,tag2,tag1,TAG_TYPE_PARENT);
 				break;
 			case TAG_TYPE_PARENT:
-				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_CHILD);
+				Pyros_Add_Relation(pyrosDB,tag2,tag1,TAG_TYPE_CHILD);
 				break;
 			case TAG_TYPE_ALIAS:
-				Pyros_Add_Ext(pyrosDB,tag2,tag1,TAG_TYPE_ALIAS);
+				Pyros_Add_Relation(pyrosDB,tag2,tag1,TAG_TYPE_ALIAS);
 			}
 		}
 	}
@@ -363,7 +363,8 @@ Pyros_Get_All_Tags(PyrosDB *pyrosDB){
 }
 
 PyrosList *
-Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash, int showExt){
+Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
+								int showRelated){
 	PyrosList *tags;
 	PyrosList *final_tags;
 	size_t i;
@@ -387,7 +388,7 @@ Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash, int showExt)
 
 	cmdlength = strlen("SELECT tag FROM tag WHERE id IN () ORDER BY tag")+1;
 	for (i = 0; i < tags->length; i++) {
-		if (showExt){
+		if (showRelated){
 			PyrosStrListMerge(tags,Get_Aliased_Ids(pyrosDB,tags->list[i]));
 			PyrosStrListMerge(tags,Get_Parent_Ids(pyrosDB,tags->list[i]));
 		}
@@ -435,52 +436,52 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 	if (tags == NULL)
 		return NULL;
 
-	structured_tags = getStructuredTags(pyrosDB,tags,PYROS_FILE_EXT);
+	structured_tags = getStructuredTags(pyrosDB,tags,PYROS_FILE_RELATIONSHIP);
 	mergeTagidsIntoPyrosTagList(pyrosDB,tags,structured_tags,NULL);
 	Pyros_List_Free(tags,free);
 	return structured_tags;
 }
 
 PyrosList *
-getExtIds(PyrosDB *pyrosDB, sqlite3_int64 *tag, int type1, int type2){
+getRelatedTagIds(PyrosDB *pyrosDB, sqlite3_int64 *tag, int type1, int type2){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 	PyrosList *pList;
 
-	sqlCompileStmt(pyrosDB,STMT_QUERY_EXT1,
+	sqlCompileStmt(pyrosDB,STMT_QUERY_RELATION1,
 				   "SELECT tag2 FROM tagrelations "
 				   "WHERE type=? AND tag=?;");
-	sqlCompileStmt(pyrosDB,STMT_QUERY_EXT2,
+	sqlCompileStmt(pyrosDB,STMT_QUERY_RELATION2,
 				   "SELECT tag FROM tagrelations "
 				   "WHERE type=? AND tag2=?;");
 
-	sqlBind(stmts[STMT_QUERY_EXT1],FALSE,2,
+	sqlBind(stmts[STMT_QUERY_RELATION1],FALSE,2,
 			SQL_INT ,type1,
 			SQL_INT64P,tag);
 
-	pList = sqlStmtGetAll(stmts[STMT_QUERY_EXT1],SQL_INT64P);
-	sqlBind(stmts[STMT_QUERY_EXT2],FALSE,2,
+	pList = sqlStmtGetAll(stmts[STMT_QUERY_RELATION1],SQL_INT64P);
+	sqlBind(stmts[STMT_QUERY_RELATION2],FALSE,2,
 			SQL_INT ,type2,
 			SQL_INT64P,tag);
 
-	PyrosListMerge(pList,sqlStmtGetAll(stmts[STMT_QUERY_EXT2],SQL_INT64P));
+	PyrosListMerge(pList,sqlStmtGetAll(stmts[STMT_QUERY_RELATION2],SQL_INT64P));
 
 	return pList;
 }
 
 PyrosList *
 Get_Aliased_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
-	return getExtIds(pyrosDB,tag,TAG_TYPE_ALIAS,TAG_TYPE_ALIAS);
+	return getRelatedTagIds(pyrosDB,tag,TAG_TYPE_ALIAS,TAG_TYPE_ALIAS);
 
 }
 
 PyrosList *
 Get_Children_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
-	return getExtIds(pyrosDB,tag,TAG_TYPE_CHILD,TAG_TYPE_PARENT);
+	return getRelatedTagIds(pyrosDB,tag,TAG_TYPE_CHILD,TAG_TYPE_PARENT);
 }
 
 PyrosList *
 Get_Parent_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
-	return getExtIds(pyrosDB,tag,TAG_TYPE_PARENT,TAG_TYPE_CHILD);
+	return getRelatedTagIds(pyrosDB,tag,TAG_TYPE_PARENT,TAG_TYPE_CHILD);
 }
 
 PyrosList *
@@ -514,8 +515,8 @@ getTagId(PyrosDB *pyrosDB,const char *tag){
 }
 
 PyrosList *
-GetExtTags(PyrosDB *pyrosDB, const char *tag,PyrosList *(*getExtIds)()){
-	PyrosList *extTags = Pyros_Create_List(1,sizeof(char*));
+GetRelatedTags(PyrosDB *pyrosDB, const char *tag,PyrosList *(*getRelatedIds)()){
+	PyrosList *relatedTags = Pyros_Create_List(1,sizeof(char*));
 	PyrosList *foundTags;
 	char *cmd;
 	int cmdlength;
@@ -526,38 +527,39 @@ GetExtTags(PyrosDB *pyrosDB, const char *tag,PyrosList *(*getExtIds)()){
 
 	id = getTagId(pyrosDB,tag);
 	if (id == NULL)
-		return extTags;
+		return relatedTags;
 
-	Pyros_List_Append(extTags,id);
+	Pyros_List_Append(relatedTags,id);
 
 	cmdlength = strlen("SELECT tag FROM tag WHERE id IN ()")+1;
-	for (i = 0; i < extTags->length; i++){
-		PyrosStrListMerge(extTags,(*getExtIds)(pyrosDB,extTags->list[i]));
+	for (i = 0; i < relatedTags->length; i++){
+		PyrosStrListMerge(relatedTags,
+						  (*getRelatedIds)(pyrosDB,relatedTags->list[i]));
 		cmdlength += 2;
 	}
 
-	Pyros_List_RShift(&extTags,1);
-	if (extTags->length == 0)
-		return extTags;
+	Pyros_List_RShift(&relatedTags,1);
+	if (relatedTags->length == 0)
+		return relatedTags;
 
 	/* BAD MALLOC */
 	cmd = malloc(sizeof(*cmd)*cmdlength);
 	strcpy(cmd,"SELECT tag FROM tag WHERE id IN (");
 
-	for (i = 0; i < extTags->length; i++){
+	for (i = 0; i < relatedTags->length; i++){
 		strcat(cmd,"?");
-		if (i+1 < extTags->length)
+		if (i+1 < relatedTags->length)
 			strcat(cmd,",");
 	}
 	strcat(cmd,")");
 	sqlPrepareStmt(pyrosDB,cmd,&Get_Tags_From_Ids);
 
 
-	sqlBindList(Get_Tags_From_Ids,extTags,SQL_INT64P);
+	sqlBindList(Get_Tags_From_Ids,relatedTags,SQL_INT64P);
 	foundTags = sqlStmtGetAll(Get_Tags_From_Ids,SQL_CHAR);
 
 	free(cmd);
-	Pyros_List_Free(extTags,free);
+	Pyros_List_Free(relatedTags,free);
 	sqlite3_finalize(Get_Tags_From_Ids);
 
 
@@ -566,26 +568,26 @@ GetExtTags(PyrosDB *pyrosDB, const char *tag,PyrosList *(*getExtIds)()){
 
 PyrosList *
 Pyros_Get_Aliases(PyrosDB *pyrosDB, const char *tag){
-	return GetExtTags(pyrosDB,tag,&Get_Aliased_Ids);
+	return GetRelatedTags(pyrosDB,tag,&Get_Aliased_Ids);
 }
 PyrosList *
 Pyros_Get_Parents(PyrosDB *pyrosDB, const char *tag){
-	return GetExtTags(pyrosDB,tag,&Get_Parent_Ids);
+	return GetRelatedTags(pyrosDB,tag,&Get_Parent_Ids);
 }
 PyrosList *
 Pyros_Get_Children(PyrosDB *pyrosDB, const char *tag){
-	return GetExtTags(pyrosDB,tag,&Get_Children_Ids);
+	return GetRelatedTags(pyrosDB,tag,&Get_Children_Ids);
 }
 
 void
-Pyros_Remove_Ext_Tag(PyrosDB *pyrosDB, const char *tag1, const char *tag2){
+Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1, const char *tag2){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 	int cmp;
 
 
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB,STMT_REMOVE_EXT,
+	sqlCompileStmt(pyrosDB,STMT_REMOVE_RELATION,
 				   "DELETE FROM tagrelations WHERE tag="
 				   "(SELECT id FROM tag WHERE tag=?) AND tag2="
 				   "(SELECT id FROM tag WHERE tag=?);");
@@ -593,11 +595,11 @@ Pyros_Remove_Ext_Tag(PyrosDB *pyrosDB, const char *tag1, const char *tag2){
 	cmp = strcmp(tag2, tag1);
 	if(tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0){
 		if (cmp > 0){
-			sqlBind(stmts[STMT_REMOVE_EXT],TRUE,2,
+			sqlBind(stmts[STMT_REMOVE_RELATION],TRUE,2,
 					SQL_CHAR,tag1,
 					SQL_CHAR,tag2);
 		} else{
-			sqlBind(stmts[STMT_REMOVE_EXT],TRUE,2,
+			sqlBind(stmts[STMT_REMOVE_RELATION],TRUE,2,
 					SQL_CHAR,tag2,
 					SQL_CHAR,tag1);
 		}
