@@ -134,7 +134,6 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
 	if (!isFile(filePath)){
-		/* should set an error */
 		return NULL;
 	}
 
@@ -181,7 +180,7 @@ static void
 importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 	size_t i,j;
 	size_t buffersize = 20;
-	char *tagbuffer = malloc(buffersize);
+	char *tagbuffer;
 	char filebuf[FILEBUFSIZE];
 	FILE *tagFile;
 	PyrosList *tagFileTags;
@@ -192,8 +191,12 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 
 	sprintf(tagFilePath,"%s.txt",filepath);
 
-	if (!isFile(tagFilePath))
+	if (!isFile(tagFilePath)){
+		free(tagFilePath);
 		return;
+	}
+
+	tagbuffer = malloc(buffersize);
 
 	tagFile = fopen(tagFilePath, "r");
 	tagFileTags = Pyros_Create_List(1,sizeof(char*));
@@ -226,12 +229,14 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 			}
 		}
 	}
+
 	if (lastchar != '\n'){
 		tagbuffer[j] = '\0';
 		Pyros_List_Append(tagFileTags,tagbuffer);
 	}else{
 		free(tagbuffer);
 	}
+
 	fclose(tagFile);
 
 	Pyros_Add_Tag(pyrosDB,hash,(char**)tagFileTags->list,
@@ -295,6 +300,8 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,
 			}
 		}
 	}
+
+	Pyros_List_Free(files, NULL);
 
 	return hashes;
 }

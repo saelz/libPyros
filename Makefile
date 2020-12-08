@@ -3,7 +3,7 @@ WARNING=-Wall -Werror -Wextra -Wdeclaration-after-statement
 BUILD_NAME = libpyros.so
 LIBS=-lsqlite3 -lcrypto -lmagic
 
-CFLAGS=$(WARNING) -std=c99 -fPIC -pedantic
+CFLAGS=$(WARNING) -std=c99 -fPIC -pedantic -g
 
 LDFLAGS=$(LIBS) -shared
 
