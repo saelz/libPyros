@@ -368,6 +368,7 @@ Pyros_Get_File_Count(PyrosDB *pyrosDB){
 void
 Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 	sqlite3_stmt **stmts = pyrosDB->commands;
+	char *file_path;
 
 	sqlStartTransaction(pyrosDB);
 
@@ -379,7 +380,10 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 	sqlBind(stmts[STMT_REMOVE_FILE],TRUE,1,
 			SQL_CHAR,pFile->hash);
 
-	addHook(pyrosDB,&removeFile,pFile->path,NULL,NULL);
+	file_path = malloc(strlen(pFile->path)+1);
+	strcpy(file_path,pFile->path);
+
+	addHook(pyrosDB,&removeFile,file_path,NULL,free);
 }
 
 void
