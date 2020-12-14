@@ -132,3 +132,20 @@ containsGlobChar(const char *str){
 	}
 	return FALSE;
 }
+
+int
+str_append(char **str,char *appended){
+	if (*str == NULL){
+		*str = malloc(strlen(appended)+1);
+		*str[0] = '\0';
+	} else{
+		*str = realloc(*str, strlen(*str)+strlen(appended)+1);
+	}
+
+	if (*str == NULL)
+		return FALSE;
+
+	strcat(*str,appended);
+
+	return TRUE;
+}
