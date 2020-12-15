@@ -24,6 +24,8 @@ static void getFileExt(char fileext[],const char *file);
 static char *getMime(const char *file);
 static size_t getFileSize(const char *file);
 static int isFile(const char *path);
+static void importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath);
+static int isTagFile(char *filePaths[], size_t filec, size_t p);
 
 static void
 importFile( char *file,char *path){
@@ -178,16 +180,15 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 
 static void
 importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
-	size_t i,j;
+	size_t buf_index = 0;
 	size_t buffersize = 20;
 	char *tagbuffer;
 	char filebuf[FILEBUFSIZE];
 	FILE *tagFile;
 	PyrosList *tagFileTags;
-	char lastchar = '0';
+	char lastchar = '\0';
 
-	int tagfilelen = strlen(filepath)+4+1;
-	char *tagFilePath = malloc(sizeof(*tagFilePath)*tagfilelen);
+	char *tagFilePath = malloc(strlen(filepath)+4+1);
 
 	sprintf(tagFilePath,"%s.txt",filepath);
 
@@ -201,37 +202,34 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 	tagFile = fopen(tagFilePath, "r");
 	tagFileTags = Pyros_Create_List(1,sizeof(char*));
 
-	j = 0;
 	while(fgets(filebuf, FILEBUFSIZE, tagFile) != NULL){
-		for (i = 0; i < strlen(filebuf); i++) {
+		for (size_t i = 0; i < strlen(filebuf); i++) {
 			lastchar = filebuf[i];
-			switch (filebuf[i]) {
-			default:
-				tagbuffer[j] = filebuf[i];
-				j++;
-				if (j+1 >= buffersize){
+
+			if (filebuf[i] == '\n'){
+				tagbuffer[buf_index] = '\0';
+				Pyros_List_Append(tagFileTags,tagbuffer);
+				tagbuffer = malloc(buffersize);
+
+				buf_index = 0;
+				if (tagbuffer == NULL)
+					fprintf(stderr,"pyros: allocation error");
+
+			} else {
+				tagbuffer[buf_index] = filebuf[i];
+				buf_index++;
+				if (buf_index+1 >= buffersize){
 					buffersize *= 2;
 					tagbuffer = realloc(tagbuffer,buffersize);
-					/*WEW*/
 					if (tagbuffer == NULL)
 						fprintf(stderr,"pyros: allocation error");
 				}
-				break;
-			case '\n':
-				/* append tag to taglist*/
-				tagbuffer[j] = '\0';
-				Pyros_List_Append(tagFileTags,tagbuffer);
-				j = 0;
-				tagbuffer = malloc(sizeof(*tagbuffer)*buffersize);
-				if (tagbuffer == NULL)
-					fprintf(stderr,"pyros: allocation error");
-				break;
 			}
 		}
 	}
 
 	if (lastchar != '\n'){
-		tagbuffer[j] = '\0';
+		tagbuffer[buf_index] = '\0';
 		Pyros_List_Append(tagFileTags,tagbuffer);
 	}else{
 		free(tagbuffer);
