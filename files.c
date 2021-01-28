@@ -371,7 +371,7 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 	sqlStartTransaction(pyrosDB);
 
 	sqlCompileStmt(pyrosDB,STMT_REMOVE_FILE,
-				   "DELETE FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r ');");
+				   "DELETE FROM hashes WHERE hash=LOWER(?);");
 
 	Pyros_Remove_All_Tags_From_Hash(pyrosDB, pFile->hash);
 

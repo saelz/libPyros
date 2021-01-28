@@ -72,21 +72,6 @@ hexToChar(unsigned char *str,int length, char *newstr){
 }
 
 
-/*void
-EscapeChar(char *str,char *newstr,char c,char escape){
-	int charFound = 0;
-	size_t i;
-
-	for (i = 0; i < strlen(str);i++){
-		if (str[i] == c){
-			newstr[i+charFound] = escape;
-			charFound++;
-		}
-		newstr[i+charFound] = str[i];
-	}
-	newstr[strlen(str)+charFound] = '\0';
-}*/
-
 char *
 getFilePath(PyrosDB *pyrosDB, const char *hash,const char *ext){
 	char dbPath[] = {'/','d','b','/',hash[0],hash[1],'/', '\0'};
@@ -148,4 +133,49 @@ str_append(char **str,char *appended){
 	strcat(*str,appended);
 
 	return TRUE;
+}
+
+char *
+str_remove_whitespace(const char *orig_str){
+	size_t length;
+	size_t i = 0;
+	size_t spaces_encountered = 0;
+	char *str;
+
+	if (orig_str == NULL)
+		return NULL;
+
+	length = strlen(orig_str);
+	str = malloc(length+1);
+
+	for (; *orig_str == ' '; orig_str++);
+
+	for (; *orig_str != '\0'; orig_str++){
+		switch (*orig_str){
+		case '\n':
+		case '\t':
+		case '\r':
+		case '\f':
+			break;
+		default:
+			str[i] = *orig_str;
+			i++;
+			spaces_encountered = 0;
+			break;
+		case ' ':
+			if (spaces_encountered == 0){
+				str[i] = *orig_str;
+				i++;
+			}
+			spaces_encountered++;
+			break;
+		}
+	}
+
+	if (spaces_encountered > 0)
+		str[i-1] = '\0';
+	else
+		str[i] = '\0';
+
+	return str;
 }

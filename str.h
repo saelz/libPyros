@@ -18,4 +18,6 @@ char *getFilePath(PyrosDB *pyrosDB, const char *hash, const char *ext);
 int containsGlobChar(const char *str);
 
 int str_append(char **str,char *appended);
+
+char *str_remove_whitespace(const char *str);
 #endif

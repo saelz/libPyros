@@ -9,8 +9,7 @@
 
 static int create_minmax(const char *str,struct minmax *stat);
 
-static PrcsTags* ProcessTags(PyrosDB *pyrosDB, char **tags,
-							 size_t tagc, querySettings *qSet);
+static PrcsTags* ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet);
 
 static void catTagGroup(char **str, PrcsTags prcsTags);
 static void catStatGroup(char **str, PrcsTags prcsTags);
@@ -44,33 +43,40 @@ create_minmax(const char *str,struct minmax *stat){
 }
 
 static PrcsTags*
-ProcessTags(PyrosDB *pyrosDB, char **tags, size_t tagc, querySettings *qSet){
+ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet){
 	size_t i,j;
 	sqlite3_int64 *tagid;
 	char *tag;
 
-	PrcsTags *prcsTags = malloc(sizeof(*prcsTags)*(tagc));
+	PrcsTags *prcsTags = malloc(sizeof(*prcsTags)*(tags->length));
 	if (prcsTags == NULL)
 		return NULL;
 
-	for (i = 0; i < tagc; i++){
+	for (i = 0; i < tags->length; i++){
 		prcsTags[i].type = TT_NORMAL;
 
-		if(tags[i][0] == '-'){
+		if(((char*)tags->list[i])[0] == '-'){
 			prcsTags[i].filtered = TRUE;
-			tag = &tags[i][1];
+			tag = &((char*)tags->list[i])[1];
 		} else{
 			prcsTags[i].filtered = FALSE;
-			tag = tags[i];
+			tag = tags->list[i];
+		}
+
+		/* skip empty string */
+		if (tag[0] == '\0'){
+			prcsTags[i].type = TT_IGNORE;
+			continue;
 		}
 
 		/* skips duplicate tags */
 		for (j = 0; j < i; j++) {
-			if (strcmp(tag,tags[j]) == 0){
+			if (strcmp(tag,tags->list[j]) == 0){
 				prcsTags[i].type = TT_IGNORE;
 				break;
 			}
 		}
+
 
 		if (prcsTags[i].type == TT_IGNORE){
 			continue;
@@ -98,33 +104,33 @@ ProcessTags(PyrosDB *pyrosDB, char **tags, size_t tagc, querySettings *qSet){
 				goto noresults;
 
 		} else if(strncmp("order:",tag,6) == 0){
-			tag = &tag[6];
+			char *ordertype = &tag[6];
 
 			(*qSet).reversed = prcsTags[i].filtered;
 			prcsTags[i].type = TT_IGNORE;
 
-			if (strcmp("ext",tag) == 0)
+			if (strcmp("ext",ordertype) == 0)
 				(*qSet).order = OT_EXT;
-			else if (strcmp("hash",tag) == 0)
+			else if (strcmp("hash",ordertype) == 0)
 				 (*qSet).order = OT_HASH;
-			else if (strcmp("mime",tag) == 0)
+			else if (strcmp("mime",ordertype) == 0)
 				 (*qSet).order = OT_MIME;
-			else if (strcmp("time",tag) == 0)
+			else if (strcmp("time",ordertype) == 0)
 				 (*qSet).order = OT_TIME;
-			else if (strcmp("size",tag) == 0)
+			else if (strcmp("size",ordertype) == 0)
 				(*qSet).order = OT_SIZE;
-			else if (strcmp("random",tag) == 0)
+			else if (strcmp("random",ordertype) == 0)
 				(*qSet).order = OT_RANDOM;
 
 		} else if(strncmp("limit:",tag,6) == 0){
 			prcsTags[i].type = TT_IGNORE;
 
-			(*qSet).pageSize = atoi(&tags[i][6]);
+			(*qSet).pageSize = atoi(&tag[6]);
 
 		} else if(strncmp("page:",tag,5) == 0){
 			prcsTags[i].type = TT_IGNORE;
 
-			(*qSet).page = atoi(&tags[i][5])-1;
+			(*qSet).page = atoi(&tag[5])-1;
 
 		} else {
 			if (containsGlobChar(tag)){
@@ -134,7 +140,8 @@ ProcessTags(PyrosDB *pyrosDB, char **tags, size_t tagc, querySettings *qSet){
 				tagid = getTagId(pyrosDB,tag);
 				if (tagid != NULL){
 					Pyros_List_Append(prcsTags[i].meta.tags,tagid);
-				} else if (!prcsTags[i].filtered){/* if tag does not exist */
+				} else if (!prcsTags[i].filtered){
+					/* if tag does not exist */
 					goto noresults;
 				}
 			}
@@ -198,6 +205,7 @@ catMetaGroup(char **str, PrcsTags prcsTags, char *label){
 }
 
 
+#include <stdio.h>
 PyrosList *
 Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 	char *cmd = NULL;
@@ -208,15 +216,25 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 
 	PyrosList *files;
 	sqlite3_stmt *Query_Hash_By_Tags;
+	PyrosList *tags;
 
 	qSet.reversed = FALSE;
 	qSet.order = OT_NONE;
 	qSet.page = -1;
 	qSet.pageSize = -1;
 
-	prcsTags = ProcessTags(pyrosDB,rawTags,tagc,&qSet);
-	if (prcsTags == NULL)
+
+	tags = Pyros_Create_List(tagc, sizeof(char*));
+	for (size_t i = 0; i < tagc; i++){
+		Pyros_List_Append(tags, str_remove_whitespace(rawTags[i]));
+	}
+
+	prcsTags = ProcessTags(pyrosDB,tags,&qSet);
+
+	if (prcsTags == NULL){
+		Pyros_List_Free(tags, &free);
 		return Pyros_Create_List(1,sizeof(char*));//returns empty list
+	}
 
 
 	str_append(&cmd,
@@ -267,7 +285,7 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 				catMetaGroup(&cmd,prcsTags[i],"ext");
 				break;
 			default:
-				return NULL;
+				goto error_return;
 			}
 		}
 	}
@@ -297,7 +315,7 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 			str_append(&cmd,"RANDOM()");
 			break;
 		default:
-			return NULL;
+			goto error_return;
 		}
 
 		if (qSet.reversed)
@@ -330,5 +348,12 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 	free(cmd);
 	free(prcsTags);
 	sqlite3_finalize(Query_Hash_By_Tags);
+	Pyros_List_Free(tags, &free);
 	return files;
+
+error_return:
+	free(cmd);
+	free(prcsTags);
+	Pyros_List_Free(tags, &free);
+	return NULL;
 }
