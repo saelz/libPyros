@@ -44,13 +44,6 @@ enum COMMAND_STMTS{
 sqlite3 *initDB(const char *database, int isNew);
 void closeDB(sqlite3 *pyrosdb);
 
-//PyrosList *sqlGetAll(PyrosDB *pyrosDB, char *sqlcommand);
-//PyrosList *sqlGetAllFiles(PyrosDB *pyrosDB, char *sqlcommand);
-
-//int sqlGet(sqlite3 *pyrosdb, char *sqlcommand,int args, ...);
-
-//int sqlexec(char* cmd,PyrosDB *pyrosDB);
-
 int sqlPrepareStmt(PyrosDB *pyrosDB,char *cmd,sqlite3_stmt **stmt);
 
 int sqlBind(sqlite3_stmt *stmt,int execute, size_t count, ...);

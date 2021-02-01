@@ -281,17 +281,6 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	sqlStmtGet(create_DB,0);
 	sqlite3_finalize(create_DB);
 
-	/* tagrelations compiled */
-	/* stores relations between tags */
-	/* NO FOREIGN KEY */
-	sqlPrepareStmt(pyrosDB,
-				   "CREATE TABLE IF NOT EXISTS tagcomp(id INTEGER PRIMARY KEY,"
-				    "tags BLOB, type INT NOT NULL)"
-				   "WITHOUT ROWID;",&create_DB);
-	sqlStmtGet(create_DB,0);
-	sqlite3_finalize(create_DB);
-
-
 	sqlPrepareStmt(pyrosDB,
 				   "INSERT OR IGNORE INTO master VALUES(?,?);",&create_DB);
 
@@ -301,9 +290,6 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	sqlBind(create_DB,TRUE,2,
 			SQL_CHAR,"hashtype",
 			SQL_INT,hashtype);
-	sqlBind(create_DB,TRUE,2,
-			SQL_CHAR,"preserve-ext",
-			SQL_INT,TRUE);
 	sqlBind(create_DB,TRUE,2,
 			SQL_CHAR,"ext case-sensitive",
 			SQL_INT,FALSE);

@@ -138,6 +138,7 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet){
 			} else{
 				prcsTags[i].meta.tags = Pyros_Create_List(1,sizeof(sqlite3_int64*));
 				tagid = getTagId(pyrosDB,tag);
+
 				if (tagid != NULL){
 					Pyros_List_Append(prcsTags[i].meta.tags,tagid);
 				} else if (!prcsTags[i].filtered){
@@ -204,45 +205,17 @@ catMetaGroup(char **str, PrcsTags prcsTags, char *label){
 	}
 }
 
-
-#include <stdio.h>
-PyrosList *
-Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
+static char *
+createSqlSearchCommand(PrcsTags *prcsTags,size_t tag_count,querySettings *qSet){
 	char *cmd = NULL;
 	int firstGroup = TRUE;
 
-	querySettings qSet;
-	PrcsTags *prcsTags;
-
-	PyrosList *files;
-	sqlite3_stmt *Query_Hash_By_Tags;
-	PyrosList *tags;
-
-	qSet.reversed = FALSE;
-	qSet.order = OT_NONE;
-	qSet.page = -1;
-	qSet.pageSize = -1;
-
-
-	tags = Pyros_Create_List(tagc, sizeof(char*));
-	for (size_t i = 0; i < tagc; i++){
-		Pyros_List_Append(tags, str_remove_whitespace(rawTags[i]));
-	}
-
-	prcsTags = ProcessTags(pyrosDB,tags,&qSet);
-
-	if (prcsTags == NULL){
-		Pyros_List_Free(tags, &free);
-		return Pyros_Create_List(1,sizeof(char*));//returns empty list
-	}
-
-
 	str_append(&cmd,
 			   "SELECT truehash,mimetype,ext,import_time,filesize "
-			    "FROM hashes WHERE id IN (");
+			   "FROM hashes WHERE id IN (");
 
 
-	for (size_t i = 0; i < tagc; i++){
+	for (size_t i = 0; i < tag_count; i++){
 		if (prcsTags[i].type != TT_IGNORE){
 
 			if (firstGroup && prcsTags[i].filtered){
@@ -260,13 +233,14 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 			case TT_NORMAL:
 				catTagGroup(&cmd,prcsTags[i]);
 				break;
+
 			case TT_TAGCOUNT:
 				if (prcsTags[i].meta.stat.max == 0){
-					str_append(&cmd,"SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash");
+					str_append(&cmd,"SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash ");
 				} else {
 					catStatGroup(&cmd, prcsTags[i]);
 					if (prcsTags[i].meta.stat.min <= 0)
-						str_append(&cmd,"UNION SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash");
+						str_append(&cmd,"UNION SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash ");
 				}
 				break;
 
@@ -278,24 +252,28 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 			case TT_HASH:
 				catMetaGroup(&cmd,prcsTags[i],"hash");
 				break;
+
 			case TT_MIME:
 				catMetaGroup(&cmd,prcsTags[i],"mimetype");
 				break;
+
 			case TT_EXT:
 				catMetaGroup(&cmd,prcsTags[i],"ext");
 				break;
-			default:
-				goto error_return;
+
+			case TT_IMPORTTIME:
+			case TT_IGNORE:
+				break;
 			}
 		}
 	}
 
 	str_append(&cmd,") GROUP BY hash");
 
-	if (qSet.order != OT_NONE){
+	if (qSet->order != OT_NONE){
 
 		str_append(&cmd," ORDER BY ");
-		switch (qSet.order){
+		switch (qSet->order){
 		case OT_EXT:
 			str_append(&cmd,"ext");
 			break;
@@ -314,26 +292,59 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 		case OT_RANDOM:
 			str_append(&cmd,"RANDOM()");
 			break;
-		default:
-			goto error_return;
+		case OT_NONE:
+			break;
 		}
 
-		if (qSet.reversed)
+		if (qSet->reversed)
 			str_append(&cmd," ASC");
 		else
 			str_append(&cmd," DESC");
 	}
 
-	if (qSet.pageSize > 0)
+	if (qSet->pageSize > 0)
 		str_append(&cmd," LIMIT ?");
-	if (qSet.page >= 0){
-		if (qSet.pageSize <= 0){
-			qSet.pageSize = 1000;
+	if (qSet->page >= 0){
+		if (qSet->pageSize <= 0){
+			qSet->pageSize = 1000;
 			str_append(&cmd," LIMIT ? OFFSET ?");
 		} else{
 			str_append(&cmd," OFFSET ?");
 		}
 	}
+
+	return cmd;
+}
+
+PyrosList *
+Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
+	char *cmd = NULL;
+
+	querySettings qSet;
+	PrcsTags *prcsTags;
+
+	PyrosList *files;
+	sqlite3_stmt *Query_Hash_By_Tags;
+	PyrosList *tags;
+
+	qSet.reversed = FALSE;
+	qSet.order = OT_NONE;
+	qSet.page = -1;
+	qSet.pageSize = -1;
+
+
+	tags = Pyros_Create_List(tagc, sizeof(char*));
+	for (size_t i = 0; i < tagc; i++)
+		Pyros_List_Append(tags, str_remove_whitespace(rawTags[i]));
+
+	prcsTags = ProcessTags(pyrosDB,tags,&qSet);
+
+	if (prcsTags == NULL){
+		Pyros_List_Free(tags, &free);
+		return Pyros_Create_List(1,sizeof(char*));/* return empty list */
+	}
+
+	cmd = createSqlSearchCommand(prcsTags, tags->length, &qSet);
 
 
 	sqlPrepareStmt(pyrosDB,cmd,&Query_Hash_By_Tags);
@@ -350,10 +361,4 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 	sqlite3_finalize(Query_Hash_By_Tags);
 	Pyros_List_Free(tags, &free);
 	return files;
-
-error_return:
-	free(cmd);
-	free(prcsTags);
-	Pyros_List_Free(tags, &free);
-	return NULL;
 }

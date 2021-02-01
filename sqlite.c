@@ -70,7 +70,7 @@ sqlBind(sqlite3_stmt *stmt,int execute, size_t count, ...){
 			sqlite3_bind_int(stmt,i,iarg);
 		} else if (arg_type == SQL_INT64){
 			i64arg = va_arg(list,sqlite3_int64);
-			sqlite3_bind_int(stmt,i,i64arg);
+			sqlite3_bind_int64(stmt,i,i64arg);
 		} else if (arg_type == SQL_INT64P){
 			i64parg = va_arg(list,sqlite3_int64*);
 			sqlite3_bind_int64(stmt,i,*i64parg);

@@ -345,7 +345,6 @@ Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 			SQL_CHAR,hash);
 }
 
-#include <stdio.h>
 int
 Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc){
 	size_t i;
