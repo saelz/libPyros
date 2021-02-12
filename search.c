@@ -211,7 +211,7 @@ createSqlSearchCommand(PrcsTags *prcsTags,size_t tag_count,querySettings *qSet){
 	int firstGroup = TRUE;
 
 	str_append(&cmd,
-			   "SELECT truehash,mimetype,ext,import_time,filesize "
+			   "SELECT hash,mimetype,ext,import_time,filesize "
 			   "FROM hashes WHERE id IN (");
 
 
@@ -236,11 +236,11 @@ createSqlSearchCommand(PrcsTags *prcsTags,size_t tag_count,querySettings *qSet){
 
 			case TT_TAGCOUNT:
 				if (prcsTags[i].meta.stat.max == 0){
-					str_append(&cmd,"SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash ");
+					str_append(&cmd,"SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) ");
 				} else {
 					catStatGroup(&cmd, prcsTags[i]);
 					if (prcsTags[i].meta.stat.min <= 0)
-						str_append(&cmd,"UNION SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) AND hash=truehash ");
+						str_append(&cmd,"UNION SELECT id FROM hashes WHERE id NOT IN ( SELECT hashid FROM tags) ");
 				}
 				break;
 

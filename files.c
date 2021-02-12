@@ -126,6 +126,7 @@ isFile(const char *path){
 char *
 Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 	char *file;
+	char *is_merged = NULL;
 	size_t filetime;
 	size_t filesize;
 	char fileext[strlen(filePath)+1];
@@ -139,6 +140,7 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 		return NULL;
 	}
 
+
 	file = malloc(sizeof(*file)*(strlen(filePath)+1));
 	if (file == NULL){
 		return NULL;
@@ -148,6 +150,12 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 	filehash = getHash(file,pyrosDB);
 	if (filehash == NULL){
 		return NULL;
+	}
+
+	is_merged = Pyros_Check_If_Merged(pyrosDB,filehash);
+	if (is_merged != NULL){
+		free(file);
+		return is_merged;
 	}
 
 	filemime = getMime(file);
@@ -161,11 +169,10 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 
 	sqlCompileStmt(pyrosDB,STMT_ADD_FILE,
 				   "INSERT OR IGNORE INTO hashes "
-				   "(hash,truehash,import_time,mimetype,ext,filesize) "
-				   "VALUES(?,?,?,?,?,?);");
+				   "(hash,import_time,mimetype,ext,filesize) "
+				   "VALUES(?,?,?,?,?);");
 
-	sqlBind(stmts[STMT_ADD_FILE],TRUE,6,
-			SQL_CHAR,filehash,
+	sqlBind(stmts[STMT_ADD_FILE],TRUE,5,
 			SQL_CHAR,filehash,
 			SQL_INT64,filetime,
 			SQL_CHAR,filemime,
@@ -319,15 +326,19 @@ PyrosFile *
 Pyros_Get_File_From_Hash(PyrosDB *pyrosDB, const char *hash){
 	int result;
 	sqlite3_stmt **stmts = pyrosDB->commands;
+	PyrosFile *pFile;
 
-	PyrosFile *pFile = malloc(sizeof(*pFile));
+	if (hash == NULL)
+		return NULL;
+
+	pFile = malloc(sizeof(*pFile));
 	if (pFile == NULL){
 		return NULL;
 	}
 
 	sqlCompileStmt(pyrosDB,STMT_QUERY_FILE_FROM_HASH,
 				   "SELECT hash,mimetype,ext,import_time,filesize "
-				   "FROM hashes WHERE truehash=LOWER(?);");
+				   "FROM hashes WHERE hash=LOWER(?);");
 
 
 
@@ -340,6 +351,11 @@ Pyros_Get_File_From_Hash(PyrosDB *pyrosDB, const char *hash){
 						SQL_CHAR,&pFile->ext,
 						SQL_INT64,&pFile->import_time,
 						SQL_INT64,&pFile->file_size);
+
+	if (pFile->hash == NULL){
+		free(pFile);
+		return NULL;
+	}
 
 	if (result == PYROS_OK){
 		pFile->path = getFilePath(pyrosDB,pFile->hash,pFile->ext);
@@ -368,6 +384,9 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 	char *file_path;
 
+	if (pFile == NULL)
+		return;
+
 	sqlStartTransaction(pyrosDB);
 
 	sqlCompileStmt(pyrosDB,STMT_REMOVE_FILE,
@@ -385,21 +404,33 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile){
 }
 
 void
-Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2){
+Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,int copytags){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
 	sqlStartTransaction(pyrosDB);
 
-	Pyros_Copy_Tags(pyrosDB,hash2,masterHash);
-
-	Pyros_Remove_All_Tags_From_Hash(pyrosDB, hash2);
+	if (copytags)
+		Pyros_Copy_Tags(pyrosDB,hash2,masterHash);
 
 	sqlCompileStmt(pyrosDB,STMT_MERGE_HASH,
-				   "UPDATE hashes SET hash=? WHERE hash=?");
+					"INSERT OR IGNORE INTO merged_hashes VALUES(?,?)");
 
 	sqlBind(stmts[STMT_MERGE_HASH],TRUE,2,
 			SQL_CHAR,masterHash,
 			SQL_CHAR,hash2);
+
+	Pyros_Remove_File(pyrosDB,
+					  Pyros_Get_File_From_Hash(pyrosDB, hash2));
+
+	/* if hash2 is a masterhash update all files merged with it to new masterhash*/
+
+	sqlCompileStmt(pyrosDB,STMT_UPDATE_MERGED,
+					"UPDATE merged_hashes SET masterfile_hash=? WHERE masterfile_hash=?");
+
+	sqlBind(stmts[STMT_UPDATE_MERGED],TRUE,2,
+			SQL_CHAR,masterHash,
+			SQL_CHAR,hash2);
+
 }
 
 void
@@ -425,33 +456,47 @@ Pyros_Duplicate_File(PyrosFile *pFile){
 	if (newFile == NULL)
 		return NULL;
 
-	*newFile = *pFile;
-	if ((newFile->path = malloc(strlen(pFile->path)+1)) == NULL){
-		free(newFile);
-		return NULL;
-	}
-	if ((newFile->hash = malloc(strlen(pFile->hash)+1)) == NULL){
-		free(newFile->path);
-		free(newFile);
-		return NULL;
-	}
-	if ((newFile->ext = malloc(strlen(pFile->ext)+1)) == NULL){
-		free(newFile->hash);
-		free(newFile->path);
-		free(newFile);
-		return NULL;
-	}
-	if ((newFile->mime = malloc(strlen(pFile->mime)+1)) == NULL){
-		free(newFile->ext);
-		free(newFile->hash);
-		free(newFile->path);
-		free(newFile);
-		return NULL;
-	}
+	*newFile = *pFile;/* for non pointers */
+	newFile->ext = NULL;
+	newFile->hash = NULL;
+	newFile->path = NULL;
+
+	if ((newFile->path = malloc(strlen(pFile->path)+1)) == NULL)
+		goto error;
+
+	if ((newFile->hash = malloc(strlen(pFile->hash)+1)) == NULL)
+		goto error;
+
+	if ((newFile->ext = malloc(strlen(pFile->ext)+1)) == NULL)
+		goto error;
+
+	if ((newFile->mime = malloc(strlen(pFile->mime)+1)) == NULL)
+		goto error;
 
 	strcpy(newFile->path,pFile->path);
 	strcpy(newFile->hash,pFile->hash);
 	strcpy(newFile->ext ,pFile->ext);
 	strcpy(newFile->mime,pFile->mime);
 	return newFile;
+error:
+	free(newFile->ext);
+	free(newFile->hash);
+	free(newFile->path);
+	free(newFile);
+	return NULL;
+}
+
+char*
+Pyros_Check_If_Merged(PyrosDB *pyrosDB, const char *filehash){
+	sqlite3_stmt **stmts = pyrosDB->commands;
+	char *masterhash = NULL;
+
+	sqlCompileStmt(pyrosDB,STMT_QUERY_MERGE_MASTER,
+				   "SELECT masterfile_hash FROM merged_hashes WHERE hash=?");
+
+	sqlBind(stmts[STMT_QUERY_MERGE_MASTER], FALSE, 1, SQL_CHAR,filehash);
+
+	sqlStmtGet(stmts[STMT_QUERY_MERGE_MASTER],1,SQL_CHAR,&masterhash);
+
+	return masterhash;
 }

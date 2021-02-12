@@ -29,10 +29,10 @@ enum PYROS_HASHTYPE{
 };
 
 enum PYROS_TAG_RELATION_FLAGS{
-	PYROS_CHILD    = 0x0001,
-	PYROS_PARENT   = 0x0010,
-	PYROS_ALIAS    = 0x0100,
-	PYROS_GLOB     = 0x1000,
+	PYROS_CHILD    = 0x1,
+	PYROS_PARENT   = 0x2,
+	PYROS_ALIAS    = 0x4,
+	PYROS_GLOB     = 0x8,
 	PYROS_FILE_RELATIONSHIP   = PYROS_ALIAS|PYROS_PARENT,
 	PYROS_SEARCH_RELATIONSHIP = PYROS_ALIAS|PYROS_CHILD|PYROS_GLOB,
 };
@@ -93,10 +93,7 @@ PyrosFile* Pyros_Duplicate_File(PyrosFile *pFile);
 /* returns hash of file */
 char *Pyros_Add(PyrosDB *pyrosDB, const char *file);
 /* returns list of file hashes  */
-PyrosList * Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,
-					char *tags[], size_t tagc,
-					int useTagfile,int returnHashes,
-					Pyros_Add_Full_Callback,void *callback_data);
+PyrosList * Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,char *tags[], size_t tagc, int useTagfile,int returnHashes, Pyros_Add_Full_Callback,void *callback_data);
 int Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc);
 
 /* PyrosTag functions */
@@ -108,8 +105,7 @@ PyrosList *Pyros_Get_All_Hashes(PyrosDB *pyrosDB);
 PyrosList *Pyros_Get_All_Tags(PyrosDB *pyrosDB);
 
 PyrosList *Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash);
-PyrosList *Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
-										   int showRelated);
+PyrosList *Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,int showRelated);
 PyrosList *Pyros_Get_Aliases(PyrosDB *pyrosDB, const char *tag);
 PyrosList *Pyros_Get_Parents(PyrosDB *pyrosDB, const char *tag);
 PyrosList *Pyros_Get_Children(PyrosDB *pyrosDB,const char *tag);
@@ -138,7 +134,10 @@ void Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
 								   const char *tag2);
 void Pyros_Remove_Dead_Tags(PyrosDB *pyrosDB);
 
-void Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2);
+void Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2, int copy_tags_to_maser_file);
+
+char* Pyros_Check_If_Merged(PyrosDB *pyrosDB, const char *filehash);
+
 void Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2);
 
 /* pyroslist.c */

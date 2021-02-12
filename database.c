@@ -239,7 +239,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	/* stores hash,hash metadata and id */
 	sqlPrepareStmt(pyrosDB,
 				   "CREATE TABLE IF NOT EXISTS hashes(id INTEGER PRIMARY KEY,"
-				   "hash TEXT COLLATE NOCASE,truehash TEXT UNIQUE COLLATE NOCASE,"
+				   "hash TEXT UNIQUE COLLATE NOCASE,"
 				   "import_time INT,"
 				   "mimetype TEXT,ext TEXT COLLATE NOCASE,filesize INT);",
 				   &create_DB);
@@ -259,24 +259,37 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	/* tags table */
 	/* stores relations between tags and hashes */
 	sqlPrepareStmt(pyrosDB,
-				   "CREATE TABLE IF NOT EXISTS tags(hashid INT NOT NULL, "
-				   "tagid INT NOT NULL,isantitag INT NOT NULL,"
-				   "PRIMARY KEY(hashid,tagid,isantitag),"
-				   "CONSTRAINT fk_hashes"
-				   " FOREIGN KEY (hashid) REFERENCES hashes(id)"
-				   " ON DELETE CASCADE"
-				   ",CONSTRAINT fk_tag"
-				   " FOREIGN KEY (tagid) REFERENCES  tag(id)"
-				   " ON DELETE CASCADE)WITHOUT ROWID;",&create_DB);
+				   "CREATE TABLE IF NOT EXISTS tags(hashid INT NOT NULL,"
+				   " tagid INT NOT NULL,isantitag INT NOT NULL,"
+				   " PRIMARY KEY(hashid,tagid,isantitag),"
+				   " CONSTRAINT fk_hashes"
+				   "  FOREIGN KEY (hashid) REFERENCES hashes(id)"
+				   "  ON DELETE CASCADE,"
+				   " CONSTRAINT fk_tag"
+				   "  FOREIGN KEY (tagid) REFERENCES  tag(id)"
+				   "  ON DELETE CASCADE)"
+				   "WITHOUT ROWID;",&create_DB);
 	sqlStmtGet(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* tagrelations table */
 	/* stores relations between tags */
-	/* NO FOREIGN KEY */
 	sqlPrepareStmt(pyrosDB,
 				   "CREATE TABLE IF NOT EXISTS tagrelations(tag INT NOT NULL, tag2 INT NOT NULL,"
-				   "type INT NOT NULL,PRIMARY KEY(tag,tag2))"
+				   " type INT NOT NULL,PRIMARY KEY(tag,tag2))"
+				   "WITHOUT ROWID;",&create_DB);
+	sqlStmtGet(create_DB,0);
+	sqlite3_finalize(create_DB);
+
+	/* merged_hashes table */
+	/* stores hashes for files marked as duplicates/merged */
+	sqlPrepareStmt(pyrosDB,
+				   "CREATE TABLE IF NOT EXISTS merged_hashes("
+				   " masterfile_hash TEXT NOT NULL,"
+				   " hash TEXT PRIMARY KEY,"
+				   " CONSTRAINT fk_masterhash"
+				   "  FOREIGN KEY (masterfile_hash) REFERENCES hashes(hash)"
+				   "  ON DELETE CASCADE)"
 				   "WITHOUT ROWID;",&create_DB);
 	sqlStmtGet(create_DB,0);
 	sqlite3_finalize(create_DB);

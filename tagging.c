@@ -320,7 +320,7 @@ Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash, const char *orig_
 
 	sqlCompileStmt(pyrosDB, STMT_REMOVE_TAG_FROM_FILE,
 				   "DELETE FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE truehash=?) AND "
+				   "(SELECT id FROM hashes WHERE hash=?) AND "
 				   "tagid=(SELECT id FROM tag WHERE tag=LOWER(?));");
 
 
@@ -338,7 +338,7 @@ Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 
 	sqlCompileStmt(pyrosDB, STMT_REMOVE_TAGS_FROM_FILE,
 				   "DELETE FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE truehash=TRIM(LOWER(?),'\n\t\r\f '));");
+				   "(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f '));");
 
 
 	sqlBind(stmts[STMT_REMOVE_TAGS_FROM_FILE],TRUE,1,
@@ -358,7 +358,7 @@ Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc){
 
 	sqlCompileStmt(pyrosDB,STMT_ADD_TAG_TO_FILE,
 				   "INSERT OR IGNORE INTO tags VALUES("
-				   "(SELECT id FROM hashes WHERE truehash=TRIM(LOWER(?),'\n\t\r\f ')),"
+				   "(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f ')),"
 				   "(SELECT id FROM tag WHERE tag=LOWER(?)),?);");
 
 	for (i = 0;i < tagc;i++){
@@ -456,7 +456,7 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 
 	sqlCompileStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH,
 				   "SELECT tagid FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE truehash=?) AND isantitag=0;");
+				   "(SELECT id FROM hashes WHERE hash=?) AND isantitag=0;");
 
 	sqlBind(stmts[STMT_QUERY_TAG_BY_HASH],FALSE,1,SQL_CHAR,hash);
 
