@@ -149,6 +149,7 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 
 	filehash = getHash(file,pyrosDB);
 	if (filehash == NULL){
+		free(file);
 		return NULL;
 	}
 
