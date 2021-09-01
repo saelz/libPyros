@@ -137,6 +137,9 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet){
 				prcsTags[i].meta.tags = getTagIdByGlob(pyrosDB,tag);
 			} else{
 				prcsTags[i].meta.tags = Pyros_Create_List(1,sizeof(sqlite3_int64*));
+				if (prcsTags[i].meta.tags == NULL)
+					goto error;
+
 				tagid = getTagId(pyrosDB,tag);
 
 				if (tagid != NULL){
@@ -160,7 +163,8 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet){
 
 	return prcsTags;
 
-	noresults:
+error:
+noresults:
 	for (j=0; j <= i; j++)
 		if (prcsTags[j].type == TT_NORMAL)
 			Pyros_List_Free(prcsTags[j].meta.tags,free);
@@ -334,14 +338,17 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc){
 
 
 	tags = Pyros_Create_List(tagc, sizeof(char*));
+	if (tags == NULL)
+		return NULL;
+
 	for (size_t i = 0; i < tagc; i++)
 		Pyros_List_Append(tags, str_remove_whitespace(rawTags[i]));
 
 	prcsTags = ProcessTags(pyrosDB,tags,&qSet);
 
 	if (prcsTags == NULL){
-		Pyros_List_Free(tags, &free);
-		return Pyros_Create_List(1,sizeof(char*));/* return empty list */
+		Pyros_List_Clear(tags, &free);
+		return tags;/* return empty list */
 	}
 
 	cmd = createSqlSearchCommand(prcsTags, tags->length, &qSet);

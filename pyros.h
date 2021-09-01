@@ -55,8 +55,6 @@ typedef struct PyrosTag{
 typedef struct PyrosDB{
 	void *database;
 	char *path;
-	/*char err[100];*/
-	enum PYROS_ERROR errcode;/* UNUSED */
 	void *commands;
 	PyrosList *hook;
 	int is_ext_case_sensitive;/* UNUSED */
@@ -146,7 +144,12 @@ PyrosList *Pyros_Create_List(int elements, size_t element_size);
 
 void Pyros_List_Free(PyrosList *pList, Pyros_Free_Callback);
 
+void Pyros_List_Clear(PyrosList *pList, Pyros_Free_Callback cb);
+
+void Pyros_List_Shrink(PyrosList *pList);
+
 enum PYROS_ERROR Pyros_List_Append(PyrosList *pList, void *ptr);
+
 void Pyros_List_RShift(PyrosList **pList, size_t shift);
 
 #ifdef __cplusplus

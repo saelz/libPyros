@@ -24,7 +24,7 @@ static void getFileExt(char fileext[],const char *file);
 static char *getMime(const char *file);
 static size_t getFileSize(const char *file);
 static int isFile(const char *path);
-static void importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath);
+static enum PYROS_ERROR importTagsFromTagFile(PyrosDB *pyrosDB,char *filepath, PyrosList *tagFileTags);
 static int isTagFile(char *filePaths[], size_t filec, size_t p);
 
 static void
@@ -186,29 +186,41 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath){
 	return filehash;
 }
 
-static void
-importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
+static enum PYROS_ERROR
+importTagsFromTagFile(PyrosDB *pyrosDB,char *filepath,
+					  PyrosList *tagFileTags){
 	size_t buf_index = 0;
 	size_t buffersize = 20;
-	char *tagbuffer;
+	char *tagbuffer = NULL;
 	char filebuf[FILEBUFSIZE];
-	FILE *tagFile;
-	PyrosList *tagFileTags;
+	FILE *tagFile = NULL;
 	char lastchar = '\0';
 
-	char *tagFilePath = malloc(strlen(filepath)+4+1);
+	char *tagFilePath = NULL;
+
+	tagFilePath = malloc(strlen(filepath)+4+1);
+
+	if (tagFilePath == NULL)
+		goto error;
 
 	sprintf(tagFilePath,"%s.txt",filepath);
 
 	if (!isFile(tagFilePath)){
 		free(tagFilePath);
-		return;
+		return PYROS_OK;
 	}
 
-	tagbuffer = malloc(buffersize);
 
 	tagFile = fopen(tagFilePath, "r");
-	tagFileTags = Pyros_Create_List(1,sizeof(char*));
+	if (tagFile == NULL){
+		perror("Error reading tag file");
+		goto error;
+	}
+
+
+	tagbuffer = malloc(buffersize);
+	if (tagbuffer == NULL)
+		goto error;
 
 	while(fgets(filebuf, FILEBUFSIZE, tagFile) != NULL){
 		for (size_t i = 0; i < strlen(filebuf); i++) {
@@ -221,7 +233,7 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 
 				buf_index = 0;
 				if (tagbuffer == NULL)
-					fprintf(stderr,"pyros: allocation error");
+					goto error;
 
 			} else {
 				tagbuffer[buf_index] = filebuf[i];
@@ -230,7 +242,7 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 					buffersize *= 2;
 					tagbuffer = realloc(tagbuffer,buffersize);
 					if (tagbuffer == NULL)
-						fprintf(stderr,"pyros: allocation error");
+						goto error;
 				}
 			}
 		}
@@ -245,11 +257,15 @@ importTagsFromTagFile(PyrosDB *pyrosDB,char *hash,char *filepath){
 
 	fclose(tagFile);
 
-	Pyros_Add_Tag(pyrosDB,hash,(char**)tagFileTags->list,
-				  tagFileTags->length);
-
 	addHook(pyrosDB,&removeFile,tagFilePath,NULL,free);
+
+	return PYROS_OK;
+
+error:
+	free(tagbuffer);
+	free(tagFilePath);
 	Pyros_List_Free(tagFileTags,free);
+	return PYROS_ALLOCATION_ERROR;
 }
 
 static int
@@ -274,10 +290,15 @@ PyrosList *
 Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,
 			   char *tags[], size_t tagc,int useTagfile,int returnHashes,
 			   Pyros_Add_Full_Callback callback,void *callback_data){
-	PyrosList *files = Pyros_Create_List(filec,sizeof(char*));
+	PyrosList *files = NULL;
 	PyrosList *hashes = NULL;
+	PyrosList *tagFileTags = NULL;
 	size_t i;
 	char *hash;
+
+	files = Pyros_Create_List(filec,sizeof(char*));
+	if (files == NULL)
+		goto error;
 
 	for (i = 0; i < filec; i++) {
 		if (!(useTagfile && isTagFile(filePaths,filec,i))){
@@ -285,31 +306,50 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,
 		}
 	}
 
-	if (returnHashes)
+	if (returnHashes){
 		hashes = Pyros_Create_List(files->length, sizeof(char*));
+		if (hashes == NULL)
+			goto error;
+	}
+
+	if (useTagfile &&
+		(tagFileTags = Pyros_Create_List(1,sizeof(char*))) == NULL)
+		goto error;
 
 	for (i = 0; i < files->length; i++) {
+		if (useTagfile &&
+				importTagsFromTagFile(pyrosDB,files->list[i],
+									  tagFileTags) != PYROS_OK){
+			continue;
+		}
+
 		hash = Pyros_Add(pyrosDB,files->list[i]);
 		if (hash != NULL){
-			if (useTagfile)
-				importTagsFromTagFile(pyrosDB,hash,files->list[i]);
+			Pyros_Add_Tag(pyrosDB,hash,(char**)tagFileTags->list,
+						  tagFileTags->length);
 
 			Pyros_Add_Tag(pyrosDB,hash, (char**)tags, tagc);
 
 			if (callback != NULL)
 				(*callback)(hash,files->list[i],i,callback_data);
 
-			if (returnHashes && !PyrosListContainsStr(hashes, hash, NULL)){
+			if (returnHashes && !PyrosListContainsStr(hashes,hash,NULL))
 				Pyros_List_Append(hashes, hash);
-			} else{
+			else
 				free(hash);
-			}
 		}
+		Pyros_List_Clear(tagFileTags,&free);
 	}
 
+	Pyros_List_Free(tagFileTags,&free);
 	Pyros_List_Free(files, NULL);
 
 	return hashes;
+error:
+	Pyros_List_Free(tagFileTags,&free);
+	Pyros_List_Free(files, NULL);
+	Pyros_List_Free(hashes, NULL);
+	return NULL;
 }
 
 

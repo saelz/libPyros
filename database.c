@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <stdio.h>
 
 #include "pyros.h"
 #include "sqlite.h"
@@ -42,36 +43,35 @@ freeHook(PyrosHook *hook){
 
 static PyrosDB*
 Init_Pyros_DB(const char *path,int isNew){
-	PyrosDB *pyrosDB = malloc(sizeof(*pyrosDB));
-	sqlite3_stmt **stmts;
+	PyrosDB *pyrosDB = NULL;
+	sqlite3_stmt **stmts = NULL;
 	int i;
 
-	if (pyrosDB == NULL)
-		return NULL;
+	if ((pyrosDB = malloc(sizeof(*pyrosDB))) == NULL)
+		goto error;
 
-	stmts = malloc(sizeof(*stmts)*STMT_COUNT);
 
-	if (stmts == NULL)
-		return NULL;
+	if ((stmts = malloc(sizeof(*stmts)*STMT_COUNT)) == NULL)
+		goto error;
 
-	pyrosDB->path = malloc(sizeof(*pyrosDB->path)*(strlen(path)+1));
-	strcpy(pyrosDB->path,path);
-	if (pyrosDB->path == NULL){
-		free(pyrosDB);
-		return NULL;
-	}
+	if ((pyrosDB->path = malloc(sizeof(*pyrosDB->path)*
+								(strlen(path)+1))) == NULL)
+		goto error;
+
 
 	if((pyrosDB->database = initDB(path,isNew)) == NULL){
-		free(pyrosDB);
-		return NULL;
+		free(pyrosDB->path);
+		goto error;
 	}
 
+	if ((pyrosDB->hook = Pyros_Create_List(1,sizeof(PyrosHook*))) == NULL){
+		free(pyrosDB->path);
+		goto error;
+	}
 
+	strcpy(pyrosDB->path,path);
 
-	pyrosDB->hook = Pyros_Create_List(1,sizeof(PyrosHook*));
-	//strcpy(pyrosDB->err,"no error has occured");
 	pyrosDB->inTransaction = FALSE;
-
 
 
 	sqlPrepareStmt(pyrosDB,"BEGIN;" ,&stmts[STMT_BEGIN]);
@@ -82,6 +82,12 @@ Init_Pyros_DB(const char *path,int isNew){
 	pyrosDB->commands = stmts;
 
 	return pyrosDB;
+
+	error:
+	free(pyrosDB);
+	free(stmts);
+	fprintf(stderr,"Error allocating memory");
+	return NULL;
 }
 
 PyrosDB*
@@ -169,8 +175,7 @@ Pyros_Commit(PyrosDB *pyrosDB){
 				(*hook->callback)(hook->str, hook->str2);
 			}
 
-			Pyros_List_Free(pyrosDB->hook,(Pyros_Free_Callback)freeHook);
-			pyrosDB->hook = Pyros_Create_List(1,sizeof(PyrosHook*));
+			Pyros_List_Clear(pyrosDB->hook,(Pyros_Free_Callback)freeHook);
 		}
 	}
 	return ret;
@@ -215,7 +220,8 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 
 	/* create sqlite database */
 	pyrosDB = Init_Pyros_DB(path,TRUE);
-
+	if (pyrosDB == NULL)
+		return NULL;
 
 	pyrosDB->hashtype = hashtype;
 	pyrosDB->is_ext_case_sensitive = 1;

@@ -20,7 +20,7 @@ install: $(EXEC_NAME)
 	cp $(BUILD_NAME) $(LIBPATH)
 	ldconfig -v -n $(LIBPATH) > /dev/null
 
-%.o: %.c
+%.o: %.c *.h
 	$(CC) -c -o $(@F) $(CFLAGS) $<
 
 $(BUILD_NAME): $(OBJS)
