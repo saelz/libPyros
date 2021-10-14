@@ -448,6 +448,9 @@ void
 Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,int copytags){
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
+	if (!strcmp(masterHash,hash2))
+		return;
+
 	sqlStartTransaction(pyrosDB);
 
 	if (copytags)
