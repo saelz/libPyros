@@ -322,3 +322,12 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	sqlite3_finalize(create_DB);
 	return pyrosDB;
 }
+
+void
+Pyros_Vacuum_Database(PyrosDB *pyrosDB)
+{
+	sqlite3_stmt *vacuum;
+	sqlPrepareStmt(pyrosDB, "VACUUM",&vacuum);
+	sqlStmtGet(vacuum,0);
+	sqlite3_finalize(vacuum);
+}

@@ -77,12 +77,13 @@ typedef struct PyrosFile{
 typedef void (*Pyros_Add_Full_Callback)(char*,char*,size_t,void*);
 typedef void (*Pyros_Free_Callback)(void*);
 
-/* PyrosDB functions */
+/* Database functions */
 PyrosDB *Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype);
 PyrosDB *Pyros_Open_Database(const char *path);
 void Pyros_Close_Database(PyrosDB *pyrosDB);
 int Pyros_Database_Exists(const char *path);
 int Pyros_Commit(PyrosDB *pyrosDB);
+void Pyros_Vacuum_Database(PyrosDB *pyrosDB);
 
 /* PyrosFile functions */
 void Pyros_Close_File(PyrosFile *pFile);
