@@ -127,6 +127,18 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet){
 
 			(*qSet).pageSize = atoi(&tag[6]);
 
+		} else if(strncmp("explicit:",tag,9) == 0){
+			prcsTags[i].meta.tags = Pyros_Create_List(1,sizeof(sqlite3_int64*));
+			if (prcsTags[i].meta.tags == NULL)
+				goto error;
+
+			tagid = getTagId(pyrosDB,&tag[9]);
+			if (tagid != NULL){
+				Pyros_List_Append(prcsTags[i].meta.tags,tagid);
+			} else if (!prcsTags[i].filtered){
+				/* if tag does not exist */
+				goto noresults;
+			}
 		} else if(strncmp("page:",tag,5) == 0){
 			prcsTags[i].type = TT_IGNORE;
 
