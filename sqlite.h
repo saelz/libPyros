@@ -12,6 +12,7 @@ enum SQL_GET_TYPE{
 	SQL_INT64P,
 };
 
+
 enum COMMAND_STMTS{
 	STMT_BEGIN = 0,
 	STMT_END,
@@ -21,7 +22,6 @@ enum COMMAND_STMTS{
 	STMT_ADD_RELATION,
 	STMT_QUERY_RELATION1,
 	STMT_QUERY_RELATION2,
-	STMT_QUERY_HASH_BY_TAG,
 	STMT_QUERY_ALL_HASH,
 	STMT_QUERY_ALL_TAGS,
 	STMT_QUERY_TAG_BY_HASH,
@@ -31,15 +31,15 @@ enum COMMAND_STMTS{
 	STMT_QUERY_HASH_COUNT,
 	STMT_QUERY_FILE_COUNT,
 	STMT_REMOVE_TAG_FROM_FILE,
-	STMT_REMOVE_TAGS_FROM_FILE,
+	STMT_REMOVE_ALL_TAGS_FROM_FILE,
 	STMT_MERGE_HASH,
 	STMT_UPDATE_MERGED,
 	STMT_QUERY_MERGE_MASTER,
-	STMT_QUERY_TAG_COUNT,
 	STMT_REMOVE_FILE,
 	STMT_REMOVE_TAG,
 	STMT_REMOVE_RELATION,
 	STMT_REMOVE_DEAD_TAG,
+	STMT_VACUUM,
 	STMT_COUNT,
 };
 
@@ -53,10 +53,10 @@ int sqlBindList(sqlite3_stmt *stmt,PyrosList *pList,enum SQL_GET_TYPE type);
 int sqlBindTags(sqlite3_stmt *stmt,PrcsTags *prcsTags, size_t tagc,
 				querySettings qSet);
 
-int sqlStmtGet(sqlite3_stmt *stmt, size_t args, ...);
+int sqlStmtGetResults(sqlite3_stmt *stmt, size_t args, ...);
 PyrosList *sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt);
 PyrosList *sqlStmtGetAll(sqlite3_stmt *stmt,enum SQL_GET_TYPE);
 
 void sqlStartTransaction(PyrosDB *pyrosDB);
-void sqlCompileStmt(PyrosDB *db, enum COMMAND_STMTS stmt,char *cmd);
+sqlite3_stmt* sqlGetStmt(PyrosDB *db, enum COMMAND_STMTS stmt);
 #endif

@@ -38,12 +38,10 @@ static void addTagRelation(PyrosDB *pyrosDB,int type,
 int
 Pyros_Get_Tag_Count(PyrosDB *pyrosDB){
 	int filecount = -1;
-	sqlite3_stmt **stmts = pyrosDB->commands;
 
-	sqlCompileStmt(pyrosDB, STMT_QUERY_FILE_COUNT,
-				   "SELECT COUNT(1) FROM tag");
 
-	sqlStmtGet(stmts[STMT_QUERY_FILE_COUNT],1,SQL_INT,&filecount);
+	sqlStmtGetResults(sqlGetStmt(pyrosDB,STMT_QUERY_FILE_COUNT),1,
+					  SQL_INT,&filecount);
 
 	return filecount;
 }
@@ -91,7 +89,7 @@ mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,PyrosList *tagids,
 		else
 			currentTag = ((PyrosTag*)ptaglist->list[i]);
 		sqlBind(Get_Relation_Tags,FALSE,1,SQL_INT64P,tagids->list[i]);
-		sqlStmtGet(Get_Relation_Tags,1,SQL_CHAR,&currentTag->tag);
+		sqlStmtGetResults(Get_Relation_Tags,1,SQL_CHAR,&currentTag->tag);
 	}
 
 	sqlite3_finalize(Get_Relation_Tags);
@@ -240,17 +238,9 @@ Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB,const char *orig_tag, int showChi
 
 void
 Pyros_Add_Relation(PyrosDB *pyrosDB,const char *tag1, const char *tag2, int type){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB, STMT_ADD_RELATION,
-				   "INSERT OR IGNORE INTO tagrelations "
-				   "VALUES((SELECT id FROM tag WHERE tag=?),"
-				    "(SELECT id FROM tag WHERE tag=?),?);");
-
-
-	sqlBind(stmts[STMT_ADD_RELATION],TRUE,3,
+	sqlBind(sqlGetStmt(pyrosDB, STMT_ADD_RELATION),TRUE,3,
 			SQL_CHAR,tag1,
 			SQL_CHAR,tag2,
 			SQL_INT,type);
@@ -259,12 +249,7 @@ Pyros_Add_Relation(PyrosDB *pyrosDB,const char *tag1, const char *tag2, int type
 
 static void
 createTag(PyrosDB *pyrosDB, const char* tag){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
-	sqlCompileStmt(pyrosDB, STMT_ADD_TAG,
-				   "INSERT OR IGNORE INTO tag(tag) VALUES(LOWER(?));");
-
-	sqlBind(stmts[STMT_ADD_TAG],TRUE,1,SQL_CHAR,tag);
+	sqlBind(sqlGetStmt(pyrosDB, STMT_ADD_TAG),TRUE,1,SQL_CHAR,tag);
 }
 
 static void
@@ -312,36 +297,22 @@ Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child){
 
 void
 Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash, const char *orig_tag){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
 	char *tag = str_remove_whitespace(orig_tag);
 
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB, STMT_REMOVE_TAG_FROM_FILE,
-				   "DELETE FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE hash=?) AND "
-				   "tagid=(SELECT id FROM tag WHERE tag=LOWER(?));");
-
-
-	sqlBind(stmts[STMT_REMOVE_TAG_FROM_FILE],TRUE,2,
+	sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_TAG_FROM_FILE),TRUE,2,
 			SQL_CHAR,hash,
 			SQL_CHAR,tag);
+
 	free(tag);
 }
 
 void
 Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB, STMT_REMOVE_TAGS_FROM_FILE,
-				   "DELETE FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f '));");
-
-
-	sqlBind(stmts[STMT_REMOVE_TAGS_FROM_FILE],TRUE,1,
+	sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_ALL_TAGS_FROM_FILE),TRUE,1,
 			SQL_CHAR,hash);
 }
 
@@ -349,31 +320,24 @@ int
 Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc){
 	size_t i;
 
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
 	if (tagc == 0)
 		return PYROS_OK;
 
 	sqlStartTransaction(pyrosDB);
-
-	sqlCompileStmt(pyrosDB,STMT_ADD_TAG_TO_FILE,
-				   "INSERT OR IGNORE INTO tags VALUES("
-				   "(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f ')),"
-				   "(SELECT id FROM tag WHERE tag=LOWER(?)),?);");
 
 	for (i = 0;i < tagc;i++){
 		char *tag = str_remove_whitespace(tags[i]);
 		if (tag[0] != '\0'){
 			if (tag[0] == '-'){
 				createTag(pyrosDB,&tag[1]);
-				sqlBind(stmts[STMT_ADD_TAG_TO_FILE],TRUE,3,
+				sqlBind(sqlGetStmt(pyrosDB,STMT_ADD_TAG_TO_FILE),TRUE,3,
 						SQL_CHAR,hash,
 						SQL_CHAR,&tag[1],
 						SQL_INT, TRUE);
 
 			} else{
 				createTag(pyrosDB,tag);
-				sqlBind(stmts[STMT_ADD_TAG_TO_FILE],TRUE,3,
+				sqlBind(sqlGetStmt(pyrosDB,STMT_ADD_TAG_TO_FILE),TRUE,3,
 						SQL_CHAR,hash,
 						SQL_CHAR,tag,
 						SQL_INT, FALSE);
@@ -386,10 +350,7 @@ Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc){
 
 PyrosList*
 Pyros_Get_All_Tags(PyrosDB *pyrosDB){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-	sqlCompileStmt(pyrosDB,STMT_QUERY_ALL_TAGS,"SELECT tag FROM tag;");
-
-	return sqlStmtGetAll(stmts[STMT_QUERY_ALL_TAGS],SQL_CHAR);
+	return sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_ALL_TAGS),SQL_CHAR);
 }
 
 PyrosList *
@@ -401,17 +362,11 @@ Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
 	char *cmd;
 	int cmdlength;
 
-	sqlite3_stmt **stmts = pyrosDB->commands;
 	sqlite3_stmt *Query_Tag_By_Id;
 
-	sqlCompileStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH,
-				   "SELECT tagid FROM tags WHERE hashid="
-				    "(SELECT id FROM hashes WHERE hash=?) AND isantitag=0;");
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH),FALSE,1,SQL_CHAR,hash);
 
-	sqlBind(stmts[STMT_QUERY_TAG_BY_HASH],FALSE,1,SQL_CHAR,hash);
-
-
-	tags = sqlStmtGetAll(stmts[STMT_QUERY_TAG_BY_HASH],SQL_INT64P);
+	tags = sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH),SQL_INT64P);
 
 	if (tags == NULL)
 		return NULL;
@@ -452,16 +407,11 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 	PyrosList *tags;
 	PyrosList *structured_tags;
 
-	sqlite3_stmt **stmts = pyrosDB->commands;
+	;
 
-	sqlCompileStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH,
-				   "SELECT tagid FROM tags WHERE hashid="
-				   "(SELECT id FROM hashes WHERE hash=?) AND isantitag=0;");
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH),FALSE,1,SQL_CHAR,hash);
 
-	sqlBind(stmts[STMT_QUERY_TAG_BY_HASH],FALSE,1,SQL_CHAR,hash);
-
-
-	tags = sqlStmtGetAll(stmts[STMT_QUERY_TAG_BY_HASH],SQL_INT64P);
+	tags = sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_BY_HASH),SQL_INT64P);
 
 	if (tags == NULL)
 		return NULL;
@@ -474,26 +424,19 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash){
 
 PyrosList *
 getRelatedTagIds(PyrosDB *pyrosDB, sqlite3_int64 *tag, int type1, int type2){
-	sqlite3_stmt **stmts = pyrosDB->commands;
 	PyrosList *pList;
 
-	sqlCompileStmt(pyrosDB,STMT_QUERY_RELATION1,
-				   "SELECT tag2 FROM tagrelations "
-				   "WHERE type=? AND tag=?;");
-	sqlCompileStmt(pyrosDB,STMT_QUERY_RELATION2,
-				   "SELECT tag FROM tagrelations "
-				   "WHERE type=? AND tag2=?;");
-
-	sqlBind(stmts[STMT_QUERY_RELATION1],FALSE,2,
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_RELATION1),FALSE,2,
 			SQL_INT ,type1,
 			SQL_INT64P,tag);
 
-	pList = sqlStmtGetAll(stmts[STMT_QUERY_RELATION1],SQL_INT64P);
-	sqlBind(stmts[STMT_QUERY_RELATION2],FALSE,2,
+	pList = sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_RELATION1),SQL_INT64P);
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_RELATION2),FALSE,2,
 			SQL_INT ,type2,
 			SQL_INT64P,tag);
 
-	PyrosListMerge(pList,sqlStmtGetAll(stmts[STMT_QUERY_RELATION2],SQL_INT64P));
+	PyrosListMerge(pList,sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_RELATION2)
+									   ,SQL_INT64P));
 
 	return pList;
 }
@@ -516,30 +459,21 @@ Get_Parent_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag){
 
 PyrosList *
 getTagIdByGlob(PyrosDB *pyrosDB,const char *tag){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
-	sqlCompileStmt(pyrosDB,STMT_QUERY_TAG_ID_BY_GLOB,
-				   "SELECT id FROM tag WHERE tag GLOB LOWER(?);");
-
-	sqlBind(stmts[STMT_QUERY_TAG_ID_BY_GLOB],FALSE,1,
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_ID_BY_GLOB),FALSE,1,
 			SQL_CHAR,tag);
 
 
-	return sqlStmtGetAll(stmts[STMT_QUERY_TAG_ID_BY_GLOB],SQL_INT64P);
+	return sqlStmtGetAll(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_ID_BY_GLOB),SQL_INT64P);
 }
 
 sqlite3_int64*
 getTagId(PyrosDB *pyrosDB,const char *tag){
 	sqlite3_int64 *id = NULL;
-	sqlite3_stmt **stmts = pyrosDB->commands;
 
-	sqlCompileStmt(pyrosDB,STMT_QUERY_TAG_ID,
-				   "SELECT id FROM tag WHERE tag=LOWER(?);");
-
-	sqlBind(stmts[STMT_QUERY_TAG_ID],FALSE,1,
+	sqlBind(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_ID),FALSE,1,
 			SQL_CHAR,tag);
 
-	sqlStmtGet(stmts[STMT_QUERY_TAG_ID],1,SQL_INT64P,&id);
+	sqlStmtGetResults(sqlGetStmt(pyrosDB,STMT_QUERY_TAG_ID),1,SQL_INT64P,&id);
 
 	return id;
 }
@@ -611,25 +545,18 @@ Pyros_Get_Children(PyrosDB *pyrosDB, const char *tag){
 
 void
 Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1, const char *tag2){
-	sqlite3_stmt **stmts = pyrosDB->commands;
 	int cmp;
 
-
 	sqlStartTransaction(pyrosDB);
-
-	sqlCompileStmt(pyrosDB,STMT_REMOVE_RELATION,
-				   "DELETE FROM tagrelations WHERE tag="
-				   "(SELECT id FROM tag WHERE tag=?) AND tag2="
-				   "(SELECT id FROM tag WHERE tag=?);");
 
 	cmp = strcmp(tag2, tag1);
 	if(tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0){
 		if (cmp > 0){
-			sqlBind(stmts[STMT_REMOVE_RELATION],TRUE,2,
+			sqlBind(sqlGetStmt(pyrosDB,STMT_REMOVE_RELATION),TRUE,2,
 					SQL_CHAR,tag1,
 					SQL_CHAR,tag2);
 		} else{
-			sqlBind(stmts[STMT_REMOVE_RELATION],TRUE,2,
+			sqlBind(sqlGetStmt(pyrosDB,STMT_REMOVE_RELATION),TRUE,2,
 					SQL_CHAR,tag2,
 					SQL_CHAR,tag1);
 		}
@@ -638,18 +565,9 @@ Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1, const char *ta
 
 void
 Pyros_Remove_Dead_Tags(PyrosDB *pyrosDB){
-	sqlite3_stmt **stmts = pyrosDB->commands;
-
 	sqlStartTransaction(pyrosDB);
 
-	sqlCompileStmt(pyrosDB,STMT_REMOVE_DEAD_TAG,
-				   "DELETE FROM tag WHERE"
-				   " id NOT IN (SELECT tag FROM tagrelations)"
-				   " AND id NOT IN (SELECT tag2 FROM tagrelations)"
-				   " AND id NOT IN (SELECT tagid FROM tags)");
-
-	sqlStmtGet(stmts[STMT_REMOVE_DEAD_TAG], 0);
-
+	sqlStmtGetResults(sqlGetStmt(pyrosDB,STMT_REMOVE_DEAD_TAG), 0);
 }
 
 void

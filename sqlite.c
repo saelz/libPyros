@@ -8,6 +8,105 @@
 #include "sqlite.h"
 #include "libpyros.h"
 
+static char *STMT_COMMAND[STMT_COUNT] = {
+	// STMT_BEGIN
+	"BEGIN;",
+
+	// STMT_END
+	"COMMIT;",
+
+	// STMT_ADD_FILE
+	"INSERT OR IGNORE INTO hashes "
+	"(hash,import_time,mimetype,ext,filesize) "
+	"VALUES(?,?,?,?,?);",
+
+	// STMT_ADD_TAG
+	"INSERT OR IGNORE INTO tag(tag) VALUES(LOWER(?));",
+
+	// STMT_ADD_TAG_TO_FILE
+	"INSERT OR IGNORE INTO tags VALUES("
+	"(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f ')),"
+	"(SELECT id FROM tag WHERE tag=LOWER(?)),?);",
+
+	// STMT_ADD_RELATION
+	"INSERT OR IGNORE INTO tagrelations "
+	"VALUES((SELECT id FROM tag WHERE tag=?),"
+	"(SELECT id FROM tag WHERE tag=?),?);",
+
+	// STMT_QUERY_RELATION1
+	"SELECT tag2 FROM tagrelations "
+	"WHERE type=? AND tag=?;",
+	// STMT_QUERY_RELATION2,
+	"SELECT tag FROM tagrelations "
+	"WHERE type=? AND tag2=?;",
+
+	// STMT_QUERY_ALL_HASH
+	"SELECT hash FROM hashes;",
+
+	// STMT_QUERY_ALL_TAGS
+	"SELECT tag FROM tag;",
+
+	// STMT_QUERY_TAG_BY_HASH
+	"SELECT tagid FROM tags WHERE hashid="
+	"(SELECT id FROM hashes WHERE hash=?) AND isantitag=0;",
+
+	// STMT_QUERY_TAG_ID_BY_GLOB
+	"SELECT id FROM tag WHERE tag GLOB LOWER(?);",
+
+	// STMT_QUERY_TAG_ID
+	"SELECT id FROM tag WHERE tag=LOWER(?);",
+
+	// STMT_QUERY_FILE_FROM_HASH
+	"SELECT hash,mimetype,ext,import_time,filesize "
+	"FROM hashes WHERE hash=LOWER(?);",
+
+	// STMT_QUERY_HASH_COUNT
+	"SELECT COUNT(1) FROM hashes",
+
+	// STMT_QUERY_FILE_COUNT
+	"SELECT COUNT(1) FROM tag",
+
+	// STMT_REMOVE_TAG_FROM_FILE
+	"DELETE FROM tags WHERE hashid="
+	"(SELECT id FROM hashes WHERE hash=?) AND "
+	"tagid=(SELECT id FROM tag WHERE tag=LOWER(?));",
+
+	// STMT_REMOVE_ALL_TAGS_FROM_FILE
+	"DELETE FROM tags WHERE hashid="
+	"(SELECT id FROM hashes WHERE hash=TRIM(LOWER(?),'\n\t\r\f '));",
+
+	// STMT_MERGE_HASH
+	"INSERT OR IGNORE INTO merged_hashes VALUES(?,?)",
+
+	// STMT_UPDATE_MERGED
+	"UPDATE merged_hashes SET masterfile_hash=? WHERE masterfile_hash=?",
+
+	// STMT_QUERY_MERGE_MASTER
+	"SELECT masterfile_hash FROM merged_hashes WHERE hash=?",
+
+	//STMT_REMOVE_FILE
+	"DELETE FROM hashes WHERE hash=LOWER(?);",
+
+	// STMT_REMOVE_TAG
+	"DELETE FROM tags WHERE hashid="
+	"(SELECT id FROM hashes WHERE hash=?) AND "
+	"tagid=(SELECT id FROM tag WHERE tag=LOWER(?));",
+
+	//STMT_REMOVE_RELATION
+	"DELETE FROM tagrelations WHERE tag="
+	"(SELECT id FROM tag WHERE tag=?) AND tag2="
+	"(SELECT id FROM tag WHERE tag=?);",
+
+	// STMT_REMOVE_DEAD_TAG
+	"DELETE FROM tag WHERE"
+	" id NOT IN (SELECT tag FROM tagrelations)"
+	" AND id NOT IN (SELECT tag2 FROM tagrelations)"
+	" AND id NOT IN (SELECT tagid FROM tags)",
+	// STMT_VACUUM
+	"VACUUM"
+
+};
+
 sqlite3*
 initDB(const char *database,int isNew){
 	sqlite3 *pyrosdb;
@@ -58,9 +157,8 @@ sqlBind(sqlite3_stmt *stmt,int execute, size_t count, ...){
 	sqlite3_int64 i64arg;
 	sqlite3_int64 *i64parg;
 
-	count *= 2;
 	va_start(list,count);
-	for (i = 1; i < count/2+1;i++){
+	for (i = 1; i < count+1;i++){
 		arg_type = va_arg(list,int);
 		if (arg_type == SQL_CHAR){
 			strarg = va_arg(list,char*);
@@ -78,7 +176,7 @@ sqlBind(sqlite3_stmt *stmt,int execute, size_t count, ...){
 	}
 	va_end(list);
 	if (execute){
-		sqlStmtGet(stmt,0);
+		sqlStmtGetResults(stmt,0);
 	}
 	return PYROS_OK;
 
@@ -139,7 +237,7 @@ sqlBindTags(sqlite3_stmt *stmt,PrcsTags *prcsTags, size_t tagc, querySettings qS
 }
 
 int
-sqlStmtGet(sqlite3_stmt *stmt,size_t args, ...){
+sqlStmtGetResults(sqlite3_stmt *stmt,size_t args, ...){
 	va_list list;
 	size_t i;
 	int arg_type;
@@ -153,9 +251,8 @@ sqlStmtGet(sqlite3_stmt *stmt,size_t args, ...){
 
 	rc = sqlite3_step(stmt);
 	if (rc == SQLITE_ROW){
-		args *= 2;
 		va_start(list,args);
-		for (i = 0; i < args/2;i++){
+		for (i = 0; i < args;i++){
 			arg_type = va_arg(list,int);
 			if (arg_type == SQL_CHAR){
 				strptr = va_arg(list,char**);
@@ -274,16 +371,18 @@ sqlStmtGetAll(sqlite3_stmt *stmt,enum SQL_GET_TYPE type){
 
 void
 sqlStartTransaction(PyrosDB *pyrosDB){
-	sqlite3_stmt **stmts = pyrosDB->commands;
 	if (!pyrosDB->inTransaction){
-		sqlStmtGet(stmts[STMT_BEGIN],0);
+		sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_BEGIN),0);
 		pyrosDB->inTransaction = TRUE;
 	}
 }
 
-void
-sqlCompileStmt(PyrosDB *pyrosDB, enum COMMAND_STMTS stmt,char *cmd){
+sqlite3_stmt*
+sqlGetStmt(PyrosDB *pyrosDB, enum COMMAND_STMTS stmt){
 	sqlite3_stmt **stmts = pyrosDB->commands;
+
 	if (stmts[stmt] == NULL)
-		sqlPrepareStmt(pyrosDB,cmd, &stmts[stmt]);
+		sqlPrepareStmt(pyrosDB,STMT_COMMAND[stmt], &stmts[stmt]);
+
+	return stmts[stmt];
 }

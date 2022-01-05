@@ -74,9 +74,7 @@ Init_Pyros_DB(const char *path,int isNew){
 	pyrosDB->inTransaction = FALSE;
 
 
-	sqlPrepareStmt(pyrosDB,"BEGIN;" ,&stmts[STMT_BEGIN]);
-	sqlPrepareStmt(pyrosDB,"COMMIT;",&stmts[STMT_END]);
-	for (i = STMT_END+1; i < STMT_COUNT; i++)
+	for (i = 0; i < STMT_COUNT; i++)
 		stmts[i] = NULL;
 
 	pyrosDB->commands = stmts;
@@ -104,19 +102,19 @@ Pyros_Open_Database(const char *path){
 				   &Query_Master);
 
 	sqlBind(Query_Master,FALSE,1,SQL_CHAR,"hashtype");
-	sqlStmtGet(Query_Master,1,SQL_INT,&pyrosDB->hashtype);
+	sqlStmtGetResults(Query_Master,1,SQL_INT,&pyrosDB->hashtype);
 
 	sqlBind(Query_Master,FALSE,1,SQL_CHAR,"ext case-sensitive");
-	sqlStmtGet(Query_Master,1,SQL_INT,&pyrosDB->is_ext_case_sensitive);
+	sqlStmtGetResults(Query_Master,1,SQL_INT,&pyrosDB->is_ext_case_sensitive);
 
 	sqlBind(Query_Master,FALSE,1,SQL_CHAR,"tag case-sensitive");
-	sqlStmtGet(Query_Master,1,SQL_INT,&pyrosDB->is_tag_case_sensitive);
+	sqlStmtGetResults(Query_Master,1,SQL_INT,&pyrosDB->is_tag_case_sensitive);
 
 	sqlBind(Query_Master,FALSE,1,SQL_CHAR,"version");
-	sqlStmtGet(Query_Master,1,SQL_INT,&pyrosDB->version);
+	sqlStmtGetResults(Query_Master,1,SQL_INT,&pyrosDB->version);
 
 	sqlBind(Query_Master,FALSE,1,SQL_CHAR,"preserve-ext");
-	sqlStmtGet(Query_Master,1,SQL_INT,&pyrosDB->preserve_ext);
+	sqlStmtGetResults(Query_Master,1,SQL_INT,&pyrosDB->preserve_ext);
 
 	sqlite3_finalize(Query_Master);
 	return pyrosDB;
@@ -162,11 +160,10 @@ Pyros_Commit(PyrosDB *pyrosDB){
 	PyrosHook *hook;
 	int ret = PYROS_OK;
 	size_t i;
-	sqlite3_stmt **stmts = pyrosDB->commands;
 
 	if(pyrosDB->inTransaction){
 
-		ret = sqlStmtGet(stmts[STMT_END],0);
+		ret = sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_END),0);
 		pyrosDB->inTransaction = FALSE;
 
 		if (ret == PYROS_OK){
@@ -188,7 +185,6 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	char dbpath[pathlen+strlen(DBFILE)];
 
 	PyrosDB *pyrosDB;
-	sqlite3_stmt **stmts;
 	sqlite3_stmt *create_DB;
 
 	/* makes entire path */
@@ -229,8 +225,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	pyrosDB->version = PYROS_VERSION;
 	pyrosDB->inTransaction = TRUE;
 	pyrosDB->preserve_ext = TRUE;
-	stmts = pyrosDB->commands;
-	sqlStmtGet(stmts[STMT_BEGIN],0);
+	sqlStmtGetResults(sqlGetStmt(pyrosDB,STMT_BEGIN),0);
 
 
 	/* master table */
@@ -238,7 +233,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 	sqlPrepareStmt(pyrosDB,
 				   "CREATE TABLE IF NOT EXISTS master(id TEXT PRIMARY KEY,"
 				   "val INT NOT NULL)WITHOUT ROWID;",&create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* hashes table */
@@ -249,7 +244,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 				   "import_time INT,"
 				   "mimetype TEXT,ext TEXT COLLATE NOCASE,filesize INT);",
 				   &create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* tag table */
@@ -259,7 +254,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 				   "tag TEXT COLLATE NOCASE UNIQUE,"
 				   "aliases INT,parents INT,children INT);"
 				   ,&create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* tags table */
@@ -275,7 +270,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 				   "  FOREIGN KEY (tagid) REFERENCES  tag(id)"
 				   "  ON DELETE CASCADE)"
 				   "WITHOUT ROWID;",&create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* tagrelations table */
@@ -284,7 +279,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 				   "CREATE TABLE IF NOT EXISTS tagrelations(tag INT NOT NULL, tag2 INT NOT NULL,"
 				   " type INT NOT NULL,PRIMARY KEY(tag,tag2))"
 				   "WITHOUT ROWID;",&create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	/* merged_hashes table */
@@ -297,7 +292,7 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 				   "  FOREIGN KEY (masterfile_hash) REFERENCES hashes(hash)"
 				   "  ON DELETE CASCADE)"
 				   "WITHOUT ROWID;",&create_DB);
-	sqlStmtGet(create_DB,0);
+	sqlStmtGetResults(create_DB,0);
 	sqlite3_finalize(create_DB);
 
 	sqlPrepareStmt(pyrosDB,
@@ -326,8 +321,5 @@ Pyros_Create_Database(char *path,enum PYROS_HASHTYPE hashtype){
 void
 Pyros_Vacuum_Database(PyrosDB *pyrosDB)
 {
-	sqlite3_stmt *vacuum;
-	sqlPrepareStmt(pyrosDB, "VACUUM",&vacuum);
-	sqlStmtGet(vacuum,0);
-	sqlite3_finalize(vacuum);
+	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_VACUUM),0);
 }

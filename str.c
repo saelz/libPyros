@@ -138,8 +138,8 @@ str_append(char **str,char *appended){
 char *
 str_remove_whitespace(const char *orig_str){
 	size_t length;
-	size_t i = 0;
-	size_t spaces_encountered = 0;
+	size_t last_char = 0;
+	size_t spaces_encountered = FALSE;
 	char *str;
 
 	if (orig_str == NULL)
@@ -158,24 +158,24 @@ str_remove_whitespace(const char *orig_str){
 		case '\f':
 			break;
 		default:
-			str[i] = *orig_str;
-			i++;
-			spaces_encountered = 0;
+			str[last_char] = *orig_str;
+			last_char++;
+			spaces_encountered = FALSE;
 			break;
 		case ' ':
-			if (spaces_encountered == 0){
-				str[i] = *orig_str;
-				i++;
+			if (!spaces_encountered){
+				str[last_char] = *orig_str;
+				last_char++;
 			}
-			spaces_encountered++;
+			spaces_encountered = TRUE;
 			break;
 		}
 	}
 
-	if (spaces_encountered > 0)
-		str[i-1] = '\0';
+	if (spaces_encountered)
+		str[last_char-1] = '\0';
 	else
-		str[i] = '\0';
+		str[last_char] = '\0';
 
 	return str;
 }
