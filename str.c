@@ -151,24 +151,17 @@ str_remove_whitespace(const char *orig_str){
 	for (; *orig_str == ' '; orig_str++);
 
 	for (; *orig_str != '\0'; orig_str++){
-		switch (*orig_str){
-		case '\n':
-		case '\t':
-		case '\r':
-		case '\f':
-			break;
-		default:
-			str[last_char] = *orig_str;
-			last_char++;
-			spaces_encountered = FALSE;
-			break;
-		case ' ':
+		if (*str == ' '){
 			if (!spaces_encountered){
 				str[last_char] = *orig_str;
 				last_char++;
 			}
 			spaces_encountered = TRUE;
-			break;
+
+		} else if (!isspace(*str) && !isblank(*str)){
+			str[last_char] = *orig_str;
+			last_char++;
+			spaces_encountered = FALSE;
 		}
 	}
 
