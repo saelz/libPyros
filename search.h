@@ -2,7 +2,7 @@
 #define PYROS_SEARCH_H
 #include "pyros.h"
 
-enum Order_Type{
+enum Order_Type {
 	OT_NONE,
 	OT_EXT,
 	OT_HASH,
@@ -12,7 +12,7 @@ enum Order_Type{
 	OT_RANDOM,
 };
 
-enum Tag_Type{
+enum Tag_Type {
 	TT_NORMAL,
 	TT_HASH,
 	TT_EXT,
@@ -23,7 +23,7 @@ enum Tag_Type{
 	TT_ALL
 };
 
-struct minmax{
+struct minmax {
 	int min;
 	int max;
 };

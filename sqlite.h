@@ -5,15 +5,14 @@
 
 #include <sqlite3.h>
 
-enum SQL_GET_TYPE{
+enum SQL_GET_TYPE {
 	SQL_CHAR,
 	SQL_INT,
 	SQL_INT64,
 	SQL_INT64P,
 };
 
-
-enum COMMAND_STMTS{
+enum COMMAND_STMTS {
 	STMT_BEGIN = 0,
 	STMT_END,
 	STMT_ADD_FILE,
@@ -46,17 +45,17 @@ enum COMMAND_STMTS{
 sqlite3 *initDB(const char *database, int isNew);
 void closeDB(sqlite3 *pyrosdb);
 
-int sqlPrepareStmt(PyrosDB *pyrosDB,char *cmd,sqlite3_stmt **stmt);
+int sqlPrepareStmt(PyrosDB *pyrosDB, char *cmd, sqlite3_stmt **stmt);
 
-int sqlBind(sqlite3_stmt *stmt,int execute, size_t count, ...);
-int sqlBindList(sqlite3_stmt *stmt,PyrosList *pList,enum SQL_GET_TYPE type);
-int sqlBindTags(sqlite3_stmt *stmt,PrcsTags *prcsTags, size_t tagc,
-				querySettings qSet);
+int sqlBind(sqlite3_stmt *stmt, int execute, size_t count, ...);
+int sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_GET_TYPE type);
+int sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
+                querySettings qSet);
 
 int sqlStmtGetResults(sqlite3_stmt *stmt, size_t args, ...);
 PyrosList *sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt);
-PyrosList *sqlStmtGetAll(sqlite3_stmt *stmt,enum SQL_GET_TYPE);
+PyrosList *sqlStmtGetAll(sqlite3_stmt *stmt, enum SQL_GET_TYPE);
 
 void sqlStartTransaction(PyrosDB *pyrosDB);
-sqlite3_stmt* sqlGetStmt(PyrosDB *db, enum COMMAND_STMTS stmt);
+sqlite3_stmt *sqlGetStmt(PyrosDB *db, enum COMMAND_STMTS stmt);
 #endif

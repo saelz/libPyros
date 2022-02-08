@@ -1,0 +1,9 @@
+BasedOnStyle: LLVM
+IndentWidth: 8
+UseTab: ForIndentation
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 2
+AlwaysBreakAfterDefinitionReturnType: All
+AlwaysBreakAfterReturnType: AllDefinitions
+SortIncludes: true
+AlignArrayOfStructures: Left
