@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -7,14 +8,17 @@
 #include "sqlite.h"
 #include "str.h"
 
+#include <stdio.h>
+
 static int create_minmax(const char *str, struct minmax *stat);
 
 static PrcsTags *ProcessTags(PyrosDB *pyrosDB, PyrosList *tags,
                              querySettings *qSet);
 
-static void catTagGroup(char **str, PrcsTags prcsTags);
-static void catStatGroup(char **str, PrcsTags prcsTags);
-static void catMetaGroup(char **str, PrcsTags prcsTags, char *label);
+static enum PYROS_ERROR catTagGroup(char **str, PrcsTags prcsTags);
+static enum PYROS_ERROR catStatGroup(char **str, PrcsTags prcsTags);
+static enum PYROS_ERROR catMetaGroup(char **str, PrcsTags prcsTags,
+                                     char *label);
 
 static int
 create_minmax(const char *str, struct minmax *stat) {
@@ -44,12 +48,15 @@ create_minmax(const char *str, struct minmax *stat) {
 static PrcsTags *
 ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet) {
 	size_t i, j;
-	sqlite3_int64 *tagid;
+	int64_t *tagid;
 	char *tag;
 
 	PrcsTags *prcsTags = malloc(sizeof(*prcsTags) * (tags->length));
-	if (prcsTags == NULL)
+
+	if (prcsTags == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 		return NULL;
+	}
 
 	for (i = 0; i < tags->length; i++) {
 		prcsTags[i].type = TT_NORMAL;
@@ -126,16 +133,21 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet) {
 			(*qSet).pageSize = atoi(&tag[6]);
 
 		} else if (strncmp("explicit:", tag, 9) == 0) {
-			prcsTags[i].meta.tags =
-			    Pyros_Create_List(1, sizeof(sqlite3_int64 *));
+			prcsTags[i].meta.tags = Pyros_Create_List(1);
 			if (prcsTags[i].meta.tags == NULL)
-				goto error;
+				goto error_oom;
 
 			tagid = getTagId(pyrosDB, &tag[9]);
 			if (tagid != NULL) {
-				Pyros_List_Append(prcsTags[i].meta.tags, tagid);
+				if (Pyros_List_Append(prcsTags[i].meta.tags,
+				                      tagid) != PYROS_OK) {
+					free(tagid);
+					goto error_oom;
+				}
+			} else if (pyrosDB->error != PYROS_OK) {
+				goto error;
 			} else if (!prcsTags[i].filtered) {
-				/* if tag does not exist */
+				/* if tag does not exist*/
 				goto noresults;
 			}
 		} else if (strncmp("page:", tag, 5) == 0) {
@@ -147,17 +159,24 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet) {
 			if (containsGlobChar(tag)) {
 				prcsTags[i].meta.tags =
 				    getTagIdByGlob(pyrosDB, tag);
-			} else {
-				prcsTags[i].meta.tags = Pyros_Create_List(
-				    1, sizeof(sqlite3_int64 *));
 				if (prcsTags[i].meta.tags == NULL)
 					goto error;
+			} else {
+				prcsTags[i].meta.tags = Pyros_Create_List(1);
+				if (prcsTags[i].meta.tags == NULL)
+					goto error_oom;
 
 				tagid = getTagId(pyrosDB, tag);
 
 				if (tagid != NULL) {
-					Pyros_List_Append(prcsTags[i].meta.tags,
-					                  tagid);
+					if (Pyros_List_Append(
+					        prcsTags[i].meta.tags, tagid) !=
+					    PYROS_OK) {
+						free(tagid);
+						goto error_oom;
+					}
+				} else if (pyrosDB->error != PYROS_OK) {
+					goto error;
 				} else if (!prcsTags[i].filtered) {
 					/* if tag does not exist */
 					goto noresults;
@@ -165,23 +184,17 @@ ProcessTags(PyrosDB *pyrosDB, PyrosList *tags, querySettings *qSet) {
 			}
 
 			/* get ext tags */
-			for (j = 0; j < prcsTags[i].meta.tags->length; j++) {
-				PyrosStrListMerge(
-				    prcsTags[i].meta.tags,
-				    Get_Aliased_Ids(
-				        pyrosDB,
-				        prcsTags[i].meta.tags->list[j]));
-				PyrosStrListMerge(
-				    prcsTags[i].meta.tags,
-				    Get_Children_Ids(
-				        pyrosDB,
-				        prcsTags[i].meta.tags->list[j]));
-			}
+			if (mergeRelatedTagIds(pyrosDB, prcsTags[i].meta.tags,
+			                       PYROS_SEARCH_RELATIONSHIP) !=
+			    PYROS_OK)
+				goto error;
 		}
 	}
 
 	return prcsTags;
 
+error_oom:
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 error:
 noresults:
 	for (j = 0; j <= i; j++)
@@ -193,39 +206,57 @@ noresults:
 	return NULL;
 }
 
-static void
+static enum PYROS_ERROR
 catTagGroup(char **str, PrcsTags prcsTags) {
+	if (str_append(str, " SELECT hashid FROM tags WHERE tagid IN ("))
+		return PYROS_ERROR_OOM;
 
-	str_append(str, " SELECT hashid FROM tags WHERE tagid IN (");
 	for (size_t i = 0; i < prcsTags.meta.tags->length; i++)
-		str_append(str, "?,");
+		if (str_append(str, "?,") != PYROS_OK)
+			return PYROS_ERROR_OOM;
 
-	str_append(str, "NULL) AND isantitag=0 ");
+	if (str_append(str, "NULL) AND isantitag=0 ") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+
+	return PYROS_OK;
 }
 
-static void
+static enum PYROS_ERROR
 catStatGroup(char **str, PrcsTags prcsTags) {
-	str_append(
-	    str,
-	    " SELECT hashid FROM tags GROUP BY hashid HAVING COUNT(hashid)");
+	if (str_append(str, " SELECT hashid FROM tags GROUP BY hashid HAVING "
+	                    "COUNT(hashid)") != PYROS_OK)
+		return PYROS_ERROR_OOM;
 
-	if (prcsTags.meta.stat.min >= 0 && prcsTags.meta.stat.max >= 0)
-		str_append(str, " > ? AND COUNT(hashid) < ? ");
-	else if (prcsTags.meta.stat.min >= 0)
-		str_append(str, " > ? ");
-	else if (prcsTags.meta.stat.max >= 0)
-		str_append(str, " < ? ");
+	if (prcsTags.meta.stat.min >= 0 && prcsTags.meta.stat.max >= 0) {
+		if (str_append(str, " > ? AND COUNT(hashid) < ? ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
+	} else if (prcsTags.meta.stat.min >= 0) {
+		if (str_append(str, " > ? ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
+	} else if (prcsTags.meta.stat.max >= 0) {
+		if (str_append(str, " < ? ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
+	}
+
+	return PYROS_OK;
 }
 
-static void
+static enum PYROS_ERROR
 catMetaGroup(char **str, PrcsTags prcsTags, char *label) {
-	str_append(str, " SELECT id FROM hashes WHERE ");
-	str_append(str, label);
+	if (str_append(str, " SELECT id FROM hashes WHERE ") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, label) != PYROS_OK)
+		return PYROS_ERROR_OOM;
+
 	if (containsGlobChar(prcsTags.meta.text)) {
-		str_append(str, " GLOB ? ");
+		if (str_append(str, " GLOB ? ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
 	} else {
-		str_append(str, "=? ");
+		if (str_append(str, "=? ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
 	}
+
+	return PYROS_OK;
 }
 
 static char *
@@ -234,61 +265,87 @@ createSqlSearchCommand(PrcsTags *prcsTags, size_t tag_count,
 	char *cmd = NULL;
 	int firstGroup = TRUE;
 
-	str_append(&cmd, "SELECT hash,mimetype,ext,import_time,filesize "
-	                 "FROM hashes WHERE id IN (");
+	if (str_append(&cmd, "SELECT hash,mimetype,ext,import_time,filesize "
+	                     "FROM hashes WHERE id IN (") != PYROS_OK)
+		goto error;
 
 	for (size_t i = 0; i < tag_count; i++) {
 		if (prcsTags[i].type != TT_IGNORE) {
 
 			if (firstGroup && prcsTags[i].filtered) {
-				str_append(&cmd,
-				           "SELECT hashid FROM tags EXCEPT");
+				if (str_append(
+				        &cmd,
+				        "SELECT hashid FROM tags EXCEPT") !=
+				    PYROS_OK)
+					goto error;
 				firstGroup = FALSE;
 			} else if (firstGroup) {
 				firstGroup = FALSE;
 			} else if (prcsTags[i].filtered) {
-				str_append(&cmd, "EXCEPT");
+				if (str_append(&cmd, "EXCEPT") != PYROS_OK)
+					goto error;
 			} else {
-				str_append(&cmd, "INTERSECT");
+				if (str_append(&cmd, "INTERSECT") != PYROS_OK)
+					goto error;
 			}
 
 			switch (prcsTags[i].type) {
 			case TT_NORMAL:
-				catTagGroup(&cmd, prcsTags[i]);
+				if (catTagGroup(&cmd, prcsTags[i]) != PYROS_OK)
+					goto error;
 				break;
 
 			case TT_TAGCOUNT:
 				if (prcsTags[i].meta.stat.max == 0) {
-					str_append(&cmd,
-					           "SELECT id FROM hashes "
-					           "WHERE id NOT IN ( SELECT "
-					           "hashid FROM tags) ");
+					if (str_append(
+					        &cmd,
+					        "SELECT id FROM hashes "
+					        "WHERE id NOT IN ( SELECT "
+					        "hashid FROM tags) ") !=
+					    PYROS_OK)
+						goto error;
 				} else {
-					catStatGroup(&cmd, prcsTags[i]);
-					if (prcsTags[i].meta.stat.min <= 0)
-						str_append(
-						    &cmd, "UNION SELECT id "
-						          "FROM hashes WHERE "
-						          "id NOT IN ( SELECT "
-						          "hashid FROM tags) ");
+					if (catStatGroup(&cmd, prcsTags[i]) !=
+					    PYROS_OK)
+						goto error;
+
+					if (prcsTags[i].meta.stat.min <= 0) {
+						if (str_append(
+						        &cmd,
+						        "UNION SELECT id "
+						        "FROM hashes WHERE "
+						        "id NOT IN ( SELECT "
+						        "hashid FROM tags) ") !=
+						    PYROS_OK)
+							goto error;
+					}
 				}
 				break;
 
 			case TT_ALL:
-				str_append(&cmd, " SELECT id FROM hashes ");
+				if (str_append(&cmd,
+				               " SELECT id FROM hashes ") !=
+				    PYROS_OK)
+					goto error;
 				prcsTags[i].type = TT_IGNORE;
 				break;
 
 			case TT_HASH:
-				catMetaGroup(&cmd, prcsTags[i], "hash");
+				if (catMetaGroup(&cmd, prcsTags[i], "hash") !=
+				    PYROS_OK)
+					goto error;
 				break;
 
 			case TT_MIME:
-				catMetaGroup(&cmd, prcsTags[i], "mimetype");
+				if (catMetaGroup(&cmd, prcsTags[i],
+				                 "mimetype") != PYROS_OK)
+					goto error;
 				break;
 
 			case TT_EXT:
-				catMetaGroup(&cmd, prcsTags[i], "ext");
+				if (catMetaGroup(&cmd, prcsTags[i], "ext") !=
+				    PYROS_OK)
+					goto error;
 				break;
 
 			case TT_IMPORTTIME:
@@ -298,89 +355,136 @@ createSqlSearchCommand(PrcsTags *prcsTags, size_t tag_count,
 		}
 	}
 
-	str_append(&cmd, ") GROUP BY hash");
+	if (str_append(&cmd, ") GROUP BY hash") != PYROS_OK)
+		goto error;
 
 	if (qSet->order != OT_NONE) {
 
-		str_append(&cmd, " ORDER BY ");
+		if (str_append(&cmd, " ORDER BY ") != PYROS_OK)
+			goto error;
 		switch (qSet->order) {
 		case OT_EXT:
-			str_append(&cmd, "ext");
+			if (str_append(&cmd, "ext") != PYROS_OK)
+				goto error;
 			break;
 		case OT_HASH:
-			str_append(&cmd, "hash");
+			if (str_append(&cmd, "hash") != PYROS_OK)
+				goto error;
 			break;
 		case OT_MIME:
-			str_append(&cmd, "mimetype");
+			if (str_append(&cmd, "mimetype") != PYROS_OK)
+				goto error;
 			break;
 		case OT_TIME:
-			str_append(&cmd, "import_time");
+			if (str_append(&cmd, "import_time") != PYROS_OK)
+				goto error;
 			break;
 		case OT_SIZE:
-			str_append(&cmd, "filesize");
+			if (str_append(&cmd, "filesize") != PYROS_OK)
+				goto error;
 			break;
 		case OT_RANDOM:
-			str_append(&cmd, "RANDOM()");
+			if (str_append(&cmd, "RANDOM()") != PYROS_OK)
+				goto error;
 			break;
 		case OT_NONE:
 			break;
 		}
 
-		if (qSet->reversed)
-			str_append(&cmd, " ASC");
-		else
-			str_append(&cmd, " DESC");
+		if (qSet->reversed) {
+			if (str_append(&cmd, " ASC") != PYROS_OK)
+				goto error;
+		} else {
+			if (str_append(&cmd, " DESC") != PYROS_OK)
+				goto error;
+		}
 	}
 
 	if (qSet->pageSize > 0)
-		str_append(&cmd, " LIMIT ?");
+		if (str_append(&cmd, " LIMIT ?") != PYROS_OK)
+			goto error;
+
 	if (qSet->page >= 0) {
 		if (qSet->pageSize <= 0) {
 			qSet->pageSize = 1000;
-			str_append(&cmd, " LIMIT ? OFFSET ?");
+			if (str_append(&cmd, " LIMIT ? OFFSET ?") != PYROS_OK)
+				goto error;
 		} else {
-			str_append(&cmd, " OFFSET ?");
+			if (str_append(&cmd, " OFFSET ?") != PYROS_OK)
+				goto error;
 		}
 	}
 
 	return cmd;
+
+error:
+	free(cmd);
+	return NULL;
 }
 
 PyrosList *
 Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc) {
 	char *cmd = NULL;
+	char *tag;
 
 	querySettings qSet;
 	PrcsTags *prcsTags;
 
 	PyrosList *files;
 	sqlite3_stmt *Query_Hash_By_Tags;
-	PyrosList *tags;
+	PyrosList *tags = NULL;
+
+	assert(pyrosDB != NULL);
 
 	qSet.reversed = FALSE;
 	qSet.order = OT_NONE;
 	qSet.page = -1;
 	qSet.pageSize = -1;
 
-	tags = Pyros_Create_List(tagc, sizeof(char *));
+	tags = Pyros_Create_List(tagc);
 	if (tags == NULL)
-		return NULL;
+		goto error_oom;
 
-	for (size_t i = 0; i < tagc; i++)
-		Pyros_List_Append(tags, str_remove_whitespace(rawTags[i]));
+	if (tagc == 0)
+		return tags; /* return empty list */
+
+	assert(rawTags != NULL);
+
+	for (size_t i = 0; i < tagc; i++) {
+		assert(rawTags[i] != NULL);
+		tag = str_remove_whitespace(rawTags[i]);
+		if (tag == NULL)
+			goto error_oom;
+		if (Pyros_List_Append(tags, tag) != PYROS_OK) {
+			free(tag);
+			goto error_oom;
+		}
+	}
 
 	prcsTags = ProcessTags(pyrosDB, tags, &qSet);
 
 	if (prcsTags == NULL) {
+		if (pyrosDB->error != PYROS_OK)
+			goto error;
 		Pyros_List_Clear(tags, &free);
 		return tags; /* return empty list */
 	}
 
 	cmd = createSqlSearchCommand(prcsTags, tags->length, &qSet);
+	if (cmd == NULL)
+		goto error_oom;
 
-	sqlPrepareStmt(pyrosDB, cmd, &Query_Hash_By_Tags);
+	printf("%s\n\n",cmd);
+
+	if (sqlPrepareStmt(pyrosDB, cmd, &Query_Hash_By_Tags) != PYROS_OK)
+		goto error;
+
 	sqlBindTags(Query_Hash_By_Tags, prcsTags, tagc, qSet);
 	files = sqlStmtGetAllFiles(pyrosDB, Query_Hash_By_Tags);
+	sqlite3_finalize(Query_Hash_By_Tags);
+
+	if (files == NULL)
+		goto error;
 
 	/* clean up */
 	for (size_t i = 0; i < tagc; i++)
@@ -389,7 +493,17 @@ Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc) {
 
 	free(cmd);
 	free(prcsTags);
-	sqlite3_finalize(Query_Hash_By_Tags);
 	Pyros_List_Free(tags, &free);
 	return files;
+
+error_oom:
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+error:
+	free(cmd);
+	if (prcsTags != NULL)
+		for (size_t i = 0; i < tagc; i++)
+			if (prcsTags[i].type == TT_NORMAL)
+				Pyros_List_Free(prcsTags[i].meta.tags, free);
+	Pyros_List_Free(tags, &free);
+	return NULL;
 }

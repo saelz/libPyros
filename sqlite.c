@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +9,8 @@
 #include "pyros.h"
 #include "sqlite.h"
 #include "str.h"
+
+static enum PYROS_ERROR setSQLError(PyrosDB *pyrosDB, int rc);
 
 static char *STMT_COMMAND[STMT_COUNT] = {
     // STMT_BEGIN
@@ -107,58 +111,217 @@ static char *STMT_COMMAND[STMT_COUNT] = {
 
 };
 
-sqlite3 *
-initDB(const char *database, int isNew) {
-	sqlite3 *pyrosdb;
-	char dbfile[strlen(database) + strlen(DBFILE) + 1];
+static enum PYROS_ERROR
+setSQLError(PyrosDB *pyrosDB, int rc) {
+	assert(rc != SQLITE_MISUSE);
 
-	strcpy(dbfile, database);
+	if (rc == SQLITE_OK)
+		return PYROS_OK;
+	else if (rc == SQLITE_NOMEM)
+		return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+
+	return setError(pyrosDB, PYROS_ERROR_DATABASE,
+	                sqlite3_errmsg(pyrosDB->database));
+}
+
+enum PYROS_ERROR
+sqlInitDB(PyrosDB *pyrosDB, int isNew) {
+	sqlite3 *pyrosdb;
+	char dbfile[strlen(pyrosDB->path) + strlen(DBFILE) + 1];
+	int rc;
+
+	strcpy(dbfile, pyrosDB->path);
 	strcat(dbfile, DBFILE);
 
 	if ((access(dbfile, F_OK) != -1 && !isNew) || isNew) {
-		if (sqlite3_open(dbfile, &pyrosdb)) {
-			sqlite3_close(pyrosdb);
-			return NULL;
+		if ((rc = sqlite3_open(dbfile, &pyrosdb)) == SQLITE_OK) {
+			pyrosDB->database = pyrosdb;
+			return PYROS_OK;
 		} else {
-			return pyrosdb;
+			pyrosDB->database = NULL;
+			sqlite3_close(pyrosdb);
+			return setSQLError(pyrosDB, rc);
 		}
 	}
-	return NULL;
+
+	pyrosDB->database = NULL;
+
+	if (isNew)
+		return setError(
+		    pyrosDB, PYROS_ERROR_DATABASE,
+		    "Can't create new database, database already exists");
+	else
+		return setError(pyrosDB, PYROS_ERROR_DATABASE,
+		                "Can't open database, database does not exist");
 }
 
 void
-closeDB(sqlite3 *pyrosdb) {
-	if (sqlite3_close(pyrosdb) == SQLITE_BUSY)
-		fprintf(stderr, "Pyros: database busy!\n");
+sqlDeleteDBFile(PyrosDB *pyrosDB) {
+	char dbfile[strlen(pyrosDB->path) + strlen(DBFILE) + 1];
+	strcpy(dbfile, pyrosDB->path);
+	strcat(dbfile, DBFILE);
+	remove(dbfile);
 }
 
-int
+enum PYROS_ERROR
+sqlCloseDB(PyrosDB *pyrosDB) {
+	int rc, i;
+	if (pyrosDB->database == NULL)
+		return PYROS_OK;
+
+	for (i = 0; i < STMT_COUNT; i++) {
+		if (pyrosDB->commands[i] != NULL) {
+			sqlite3_finalize(pyrosDB->commands[i]);
+			pyrosDB->commands[i] = NULL;
+		}
+	}
+
+	rc = sqlite3_close(pyrosDB->database);
+	if (rc != SQLITE_OK)
+		return setSQLError(pyrosDB, rc);
+
+	pyrosDB->database = NULL;
+	return PYROS_OK;
+}
+
+enum PYROS_ERROR
+sqlCreateTables(PyrosDB *pyrosDB) {
+	sqlite3_stmt *create_DB;
+	int ret;
+	size_t i;
+	char *tablelist[] = {
+	    /* master table */
+	    /* stores settings */
+	    "CREATE TABLE IF NOT EXISTS master(id TEXT PRIMARY KEY,"
+	    "val INT NOT NULL)WITHOUT ROWID;",
+
+	    /* hashes table */
+	    /* stores hash,hash metadata and id */
+	    "CREATE TABLE IF NOT EXISTS hashes(id INTEGER PRIMARY KEY,"
+	    "hash TEXT UNIQUE COLLATE NOCASE,"
+	    "import_time INT,"
+	    "mimetype TEXT,ext TEXT COLLATE NOCASE,filesize INT);",
+
+	    /* tag table */
+	    /* stores tag and id */
+	    "CREATE TABLE IF NOT EXISTS tag(id INTEGER PRIMARY KEY,"
+	    "tag TEXT COLLATE NOCASE UNIQUE,"
+	    "aliases INT,parents INT,children INT);",
+
+	    /* tags table */
+	    /* stores relations between tags and hashes */
+	    "CREATE TABLE IF NOT EXISTS tags(hashid INT NOT NULL,"
+	    " tagid INT NOT NULL,isantitag INT NOT NULL,"
+	    " PRIMARY KEY(hashid,tagid,isantitag),"
+	    " CONSTRAINT fk_hashes"
+	    "  FOREIGN KEY (hashid) REFERENCES hashes(id)"
+	    "  ON DELETE CASCADE,"
+	    " CONSTRAINT fk_tag"
+	    "  FOREIGN KEY (tagid) REFERENCES  tag(id)"
+	    "  ON DELETE CASCADE)"
+	    "WITHOUT ROWID;",
+
+	    /* tagrelations table */
+	    /* stores relations between tags */
+	    "CREATE TABLE IF NOT EXISTS tagrelations(tag INT NOT "
+	    "NULL, tag2 INT NOT NULL,"
+	    " type INT NOT NULL,PRIMARY KEY(tag,tag2))"
+	    "WITHOUT ROWID;",
+
+	    /* merged_hashes table */
+	    /* stores hashes for files marked as duplicates/merged */
+	    "CREATE TABLE IF NOT EXISTS merged_hashes("
+	    " masterfile_hash TEXT NOT NULL,"
+	    " hash TEXT PRIMARY KEY,"
+	    " CONSTRAINT fk_masterhash"
+	    "  FOREIGN KEY (masterfile_hash) REFERENCES hashes(hash)"
+	    "  ON DELETE CASCADE)"
+	    "WITHOUT ROWID;",
+	};
+
+	for (i = 0; i < LENGTH(tablelist); i++) {
+		ret = sqlPrepareStmt(pyrosDB, tablelist[i], &create_DB);
+		if (ret != PYROS_OK)
+			goto error;
+
+		ret = sqlStmtGetResults(pyrosDB, create_DB);
+		if (ret != PYROS_OK)
+			goto error;
+
+		sqlite3_finalize(create_DB);
+	}
+
+	ret = sqlPrepareStmt(
+	    pyrosDB, "INSERT OR IGNORE INTO master VALUES(?,?);", &create_DB);
+	if (ret != PYROS_OK)
+		goto error;
+
+	ret = sqlBind(pyrosDB, create_DB, TRUE, SQL_CHAR, "version", SQL_INT,
+	              PYROS_VERSION);
+	if (ret != PYROS_OK)
+		goto error;
+
+	ret = sqlBind(pyrosDB, create_DB, TRUE, SQL_CHAR, "hashtype", SQL_INT,
+	              pyrosDB->hashtype);
+	if (ret != PYROS_OK)
+		goto error;
+
+	ret = sqlBind(pyrosDB, create_DB, TRUE, SQL_CHAR, "ext case-sensitive",
+	              SQL_INT, FALSE);
+	if (ret != PYROS_OK)
+		goto error;
+
+	ret = sqlBind(pyrosDB, create_DB, TRUE, SQL_CHAR, "tag case-sensitive",
+	              SQL_INT, FALSE);
+	if (ret != PYROS_OK)
+		goto error;
+
+	ret = sqlBind(pyrosDB, create_DB, TRUE, SQL_CHAR, "preserve-ext",
+	              SQL_INT, TRUE);
+	if (ret != PYROS_OK)
+		goto error;
+
+	sqlite3_finalize(create_DB);
+
+	return sqlStmtGetResults(pyrosDB, sqlGetStmt(pyrosDB, STMT_BEGIN), 0);
+
+error:
+	sqlite3_finalize(create_DB);
+	return pyrosDB->error;
+}
+
+enum PYROS_ERROR
 sqlPrepareStmt(PyrosDB *pyrosDB, char *cmd, sqlite3_stmt **stmt) {
 	int rc;
 
 	rc = sqlite3_prepare_v2(pyrosDB->database, cmd, -1, stmt, NULL);
 	if (rc != SQLITE_OK) {
-		fprintf(stderr, "Pyros: SQLite ERROR %d in \"%s\"\n", rc, cmd);
 		sqlite3_finalize(*stmt);
-		return PYROS_DB_ERR;
+		return setSQLError(pyrosDB, rc);
 	}
 
 	return PYROS_OK;
 }
 
-int
-sqlBind(sqlite3_stmt *stmt, int execute, size_t count, ...) {
+enum PYROS_ERROR
+sqlBind(PyrosDB *pyrosDB, sqlite3_stmt *stmt, int execute, ...) {
 	va_list list;
-	size_t i;
-
+	int i;
+	int count;
 	int arg_type;
 	char *strarg;
 	int iarg;
 	sqlite3_int64 i64arg;
 	sqlite3_int64 *i64parg;
 
-	va_start(list, count);
-	for (i = 1; i < count + 1; i++) {
+	if (stmt == NULL && pyrosDB->error != PYROS_OK)
+		return pyrosDB->error;
+
+	assert(stmt != NULL);
+
+	va_start(list, execute);
+	count = sqlite3_bind_parameter_count(stmt);
+	for (i = 1; i <= count; i++) {
 		arg_type = va_arg(list, int);
 		switch (arg_type) {
 		case SQL_CHAR:
@@ -180,15 +343,19 @@ sqlBind(sqlite3_stmt *stmt, int execute, size_t count, ...) {
 		}
 	}
 	va_end(list);
+
 	if (execute)
-		sqlStmtGetResults(stmt, 0);
+		return sqlStmtGetResults(pyrosDB, stmt, 0);
 
 	return PYROS_OK;
 }
 
-int
-sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_GET_TYPE type) {
+void
+sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_BIND_TYPE type) {
 	size_t i;
+
+	assert(stmt != NULL);
+
 	for (i = 0; i < pList->length; i++) {
 		if (type == SQL_CHAR)
 			sqlite3_bind_text(stmt, i + 1, pList->list[i], -1,
@@ -197,14 +364,15 @@ sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_GET_TYPE type) {
 			sqlite3_bind_int64(stmt, i + 1,
 			                   *(sqlite3_int64 *)pList->list[i]);
 	}
-	return PYROS_OK;
 }
 
-int
+void
 sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
             querySettings qSet) {
 	size_t i, j;
 	size_t pos = 1;
+
+	assert(stmt != NULL);
 
 	for (i = 0; i < tagc; i++) {
 		switch (prcsTags[i].type) {
@@ -243,159 +411,201 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 		if (qSet.page >= 0)
 			sqlite3_bind_int(stmt, pos, qSet.page * qSet.pageSize);
 	}
-
-	return PYROS_OK;
 }
 
-int
-sqlStmtGetResults(sqlite3_stmt *stmt, size_t args, ...) {
+enum PYROS_ERROR
+sqlStmtGetResults(PyrosDB *pyrosDB, sqlite3_stmt *stmt, ...) {
 	va_list list;
 	size_t i;
-	int arg_type;
+	int type;
+	size_t args;
 
 	int rc;
 	char **strptr;
-	int *iptr;
-	sqlite3_int64 **i64ptrptr;
-	sqlite3_int64 *i64ptr;
-	char *str;
+	int64_t *i64ptr;
+
+	if (stmt == NULL && pyrosDB->error != PYROS_OK)
+		return pyrosDB->error;
+	assert(stmt != NULL);
 
 	rc = sqlite3_step(stmt);
 	if (rc == SQLITE_ROW) {
-		va_start(list, args);
+		va_start(list, stmt);
+		args = sqlite3_column_count(stmt);
 		for (i = 0; i < args; i++) {
-			arg_type = va_arg(list, int);
-			switch (arg_type) {
-			case SQL_CHAR:
+			type = sqlite3_column_type(stmt, i);
+			switch (type) {
+			case SQLITE_TEXT:
 				strptr = va_arg(list, char **);
-
-				str = (char *)sqlite3_column_text(stmt, i);
-				*strptr = malloc(sizeof(**strptr) *
-				                 (strlen(str) + 1));
+				*strptr = duplicate_str(
+				    (char *)sqlite3_column_text(stmt, i));
 				if (*strptr == NULL)
-					exit(1);
+					goto error_oom;
 
-				strcpy(*strptr, str);
 				break;
-			case SQL_INT:
-				iptr = va_arg(list, int *);
-				*iptr = sqlite3_column_int(stmt, i);
-				break;
-			case SQL_INT64:
-				i64ptr = va_arg(list, sqlite3_int64 *);
+			case SQLITE_INTEGER:
+				i64ptr = va_arg(list, int64_t *);
 				*i64ptr = sqlite3_column_int64(stmt, i);
-				break;
-			case SQL_INT64P:
-				i64ptrptr = va_arg(list, sqlite3_int64 **);
-				*i64ptrptr = malloc(sizeof(**i64ptrptr));
-				if (*i64ptrptr == NULL)
-					exit(1);
-				**i64ptrptr = sqlite3_column_int64(stmt, i);
 				break;
 			}
 		}
 		va_end(list);
 	} else if (rc != SQLITE_DONE && rc != SQLITE_OK) {
-		printf("SQLCODE:%d\n", rc);
-		return PYROS_DB_ERR;
+		sqlite3_reset(stmt);
+		return setSQLError(pyrosDB, rc);
 	}
+
 	sqlite3_reset(stmt);
-	return PYROS_OK;
+	return SQLITE_OK;
+
+error_oom:
+	sqlite3_reset(stmt);
+	return setError(pyrosDB, PYROS_ERROR_OOM, "Out of Memory");
 }
 
 PyrosList *
 sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt) {
-	PyrosList *files;
+	PyrosList *files = NULL;
 	PyrosFile *pFile;
-	const char *hash;
-	const char *mime;
-	const char *ext;
-
 	int rc;
 
-	rc = sqlite3_step(stmt);
+	if (stmt == NULL && pyrosDB->error != PYROS_OK)
+		return NULL;
+	assert(stmt != NULL);
 
-	files = Pyros_Create_List(1, sizeof(char *));
+	files = Pyros_Create_List(1);
+	if (files == NULL)
+		goto error_oom;
+
+	rc = sqlite3_step(stmt);
 	while (rc == SQLITE_ROW) {
 		pFile = malloc(sizeof(*pFile));
 		if (pFile == NULL)
-			exit(1);
+			goto error_oom;
 
-		hash = (char *)sqlite3_column_text(stmt, 0);
-		mime = (char *)sqlite3_column_text(stmt, 1);
-		ext = (char *)sqlite3_column_text(stmt, 2);
+		pFile->hash =
+		    duplicate_str((char *)sqlite3_column_text(stmt, 0));
+		pFile->mime =
+		    duplicate_str((char *)sqlite3_column_text(stmt, 1));
+		pFile->ext =
+		    duplicate_str((char *)sqlite3_column_text(stmt, 2));
 		pFile->import_time = sqlite3_column_int64(stmt, 3);
 		pFile->file_size = sqlite3_column_int64(stmt, 4);
 
-		pFile->hash = malloc(sizeof(*pFile->hash) * (strlen(hash) + 1));
-		pFile->mime = malloc(sizeof(*pFile->mime) * (strlen(mime) + 1));
-		pFile->ext = malloc(sizeof(*pFile->ext) * (strlen(ext) + 1));
-
 		if (pFile->hash == NULL || pFile->mime == NULL ||
 		    pFile->ext == NULL) {
-			exit(1);
+			free(pFile->hash);
+			free(pFile->mime);
+			free(pFile->ext);
+			goto error_oom;
 		}
-		strcpy(pFile->hash, hash);
-		strcpy(pFile->mime, mime);
-		strcpy(pFile->ext, ext);
+
 		pFile->path = getFilePath(pyrosDB, pFile->hash, pFile->ext);
+		if (pFile->path == NULL) {
+			Pyros_Free_File(pFile);
+			goto error_oom;
+		}
 
 		Pyros_List_Append(files, pFile);
 		rc = sqlite3_step(stmt);
 	}
+
 	sqlite3_reset(stmt);
+
+	if (rc != SQLITE_DONE && rc != SQLITE_OK) {
+		Pyros_List_Free(files, (Pyros_Free_Callback)Pyros_Free_File);
+		setSQLError(pyrosDB, rc);
+		return NULL;
+	}
+
 	return files;
+
+error_oom:
+	sqlite3_reset(stmt);
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of Memory");
+	Pyros_List_Free(files, (Pyros_Free_Callback)Pyros_Free_File);
+	return NULL;
 }
 
 PyrosList *
-sqlStmtGetAll(sqlite3_stmt *stmt, enum SQL_GET_TYPE type) {
+sqlStmtGetAll(PyrosDB *pyrosDB, sqlite3_stmt *stmt) {
 	PyrosList *items;
 	int rc;
 	sqlite3_int64 *intptr;
 	char *str;
 	char *newstr;
+	int type;
 
-	if (type == SQL_CHAR)
-		items = Pyros_Create_List(1, sizeof(char *));
-	else if (type == SQL_INT64P)
-		items = Pyros_Create_List(1, sizeof(sqlite3_int64 *));
+	if (stmt == NULL && pyrosDB->error != PYROS_OK)
+		return NULL;
+
+	assert(stmt != NULL);
+
+	items = Pyros_Create_List(1);
+
+	if (items == NULL)
+		goto error_oom;
 
 	rc = sqlite3_step(stmt);
+	type = sqlite3_column_type(stmt, 0);
+
 	while (rc == SQLITE_ROW) {
-		if (type == SQL_CHAR) {
+		if (type == SQLITE_TEXT) {
 			str = (char *)sqlite3_column_text(stmt, 0);
-			newstr = malloc(sizeof(*newstr) * (strlen(str) + 1));
+			newstr = duplicate_str(str);
 			if (newstr == NULL)
-				exit(1);
-			strcpy(newstr, str);
+				goto error_oom;
 
 			Pyros_List_Append(items, newstr);
-		} else if (type == SQL_INT64P) {
+		} else if (type == SQLITE_INTEGER) {
 			intptr = malloc(sizeof(*intptr));
+			if (intptr == NULL)
+				goto error_oom;
+
 			*intptr = sqlite3_column_int64(stmt, 0);
 			Pyros_List_Append(items, intptr);
 		}
 		rc = sqlite3_step(stmt);
 	}
-	// sqlite3_finalize(stmt);
 	sqlite3_reset(stmt);
+
+	if (rc != SQLITE_DONE && rc != SQLITE_OK) {
+		Pyros_List_Free(items, (Pyros_Free_Callback)Pyros_Free_File);
+		setSQLError(pyrosDB, rc);
+		return NULL;
+	}
 	return items;
+
+error_oom:
+	sqlite3_reset(stmt);
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of Memory");
+	Pyros_List_Free(items, free);
+	return NULL;
 }
 
-void
+enum PYROS_ERROR
 sqlStartTransaction(PyrosDB *pyrosDB) {
+	int ret;
 	if (!pyrosDB->inTransaction) {
-		sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_BEGIN), 0);
+		ret = sqlStmtGetResults(pyrosDB,
+		                        sqlGetStmt(pyrosDB, STMT_BEGIN), 0);
+		if (ret != PYROS_OK)
+			return ret;
 		pyrosDB->inTransaction = TRUE;
 	}
+	return PYROS_OK;
 }
 
 sqlite3_stmt *
 sqlGetStmt(PyrosDB *pyrosDB, enum COMMAND_STMTS stmt) {
+	int ret;
 	sqlite3_stmt **stmts = pyrosDB->commands;
 
-	if (stmts[stmt] == NULL)
-		sqlPrepareStmt(pyrosDB, STMT_COMMAND[stmt], &stmts[stmt]);
+	if (stmts[stmt] == NULL) {
+		ret = sqlPrepareStmt(pyrosDB, STMT_COMMAND[stmt], &stmts[stmt]);
+		if (ret != PYROS_OK)
+			return NULL;
+	}
 
 	return stmts[stmt];
 }

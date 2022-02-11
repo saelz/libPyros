@@ -5,7 +5,7 @@
 
 #include <sqlite3.h>
 
-enum SQL_GET_TYPE {
+enum SQL_BIND_TYPE {
 	SQL_CHAR,
 	SQL_INT,
 	SQL_INT64,
@@ -42,20 +42,24 @@ enum COMMAND_STMTS {
 	STMT_COUNT,
 };
 
-sqlite3 *initDB(const char *database, int isNew);
-void closeDB(sqlite3 *pyrosdb);
+enum PYROS_ERROR sqlInitDB(PyrosDB *pyrosDB, int isNew);
+enum PYROS_ERROR sqlCloseDB(PyrosDB *pyrosDB);
+void sqlDeleteDBFile(PyrosDB *pyrosDB);
+enum PYROS_ERROR sqlCreateTables(PyrosDB *pyrosDB);
 
-int sqlPrepareStmt(PyrosDB *pyrosDB, char *cmd, sqlite3_stmt **stmt);
+enum PYROS_ERROR sqlPrepareStmt(PyrosDB *pyrosDB, char *cmd,
+                                sqlite3_stmt **stmt);
 
-int sqlBind(sqlite3_stmt *stmt, int execute, size_t count, ...);
-int sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_GET_TYPE type);
-int sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
-                querySettings qSet);
+enum PYROS_ERROR sqlBind(PyrosDB *pyrosDB, sqlite3_stmt *stmt, int execute,
+                         ...);
+void sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_BIND_TYPE type);
+void sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
+                 querySettings qSet);
 
-int sqlStmtGetResults(sqlite3_stmt *stmt, size_t args, ...);
+enum PYROS_ERROR sqlStmtGetResults(PyrosDB *pyrosDB, sqlite3_stmt *stmt, ...);
 PyrosList *sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt);
-PyrosList *sqlStmtGetAll(sqlite3_stmt *stmt, enum SQL_GET_TYPE);
+PyrosList *sqlStmtGetAll(PyrosDB *pyrosDB, sqlite3_stmt *stmt);
 
-void sqlStartTransaction(PyrosDB *pyrosDB);
+enum PYROS_ERROR sqlStartTransaction(PyrosDB *pyrosDB);
 sqlite3_stmt *sqlGetStmt(PyrosDB *db, enum COMMAND_STMTS stmt);
 #endif

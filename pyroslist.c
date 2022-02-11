@@ -1,10 +1,11 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "pyros.h"
 
 PyrosList *
-Pyros_Create_List(int elements, size_t element_size) {
+Pyros_Create_List(int elements) {
 	PyrosList *pList;
 
 	pList = malloc(sizeof(*pList));
@@ -15,20 +16,19 @@ Pyros_Create_List(int elements, size_t element_size) {
 	if (elements < 1)
 		elements = 1;
 
-	pList->list = malloc(sizeof(element_size) * elements);
+	pList->list = malloc(sizeof(*pList->list) * elements);
 	if (pList->list == NULL) {
 		free(pList);
 		goto error;
 	}
 
 	pList->length = 0;
-	pList->size = elements * element_size;
+	pList->size = elements * sizeof(*pList->list);
 	pList->offset = 0;
 	pList->list[0] = NULL;
 	return pList;
 
 error:
-	fprintf(stderr, "Error allocating memory");
 	return NULL;
 }
 
@@ -49,43 +49,67 @@ Pyros_List_Free(PyrosList *pList, Pyros_Free_Callback cb) {
 void
 Pyros_List_Clear(PyrosList *pList, Pyros_Free_Callback cb) {
 	size_t i;
-	if (pList != NULL) {
+	assert(pList != NULL);
+	assert(pList->list != NULL);
 
-		for (i = 0; i < pList->length; i++) {
-			if (cb != NULL)
-				cb(pList->list[i]);
-			pList->list[i] = NULL;
-		}
-
-		pList->length = 0;
-		pList->offset = 0;
+	for (i = 0; i < pList->length; i++) {
+		if (cb != NULL)
+			cb(pList->list[i]);
+		pList->list[i] = NULL;
 	}
+
+	pList->length = 0;
+	pList->offset = 0;
 }
 
-void
+enum PYROS_ERROR
 Pyros_List_Shrink(PyrosList *pList) {
 	void *tmpptr;
 	size_t tmpsize;
 
-	if (pList != NULL &&
-	    pList->length * sizeof(pList->list[0]) < pList->size) {
+	assert(pList != NULL);
+	assert(*pList->list != NULL);
 
-		tmpsize = pList->length * sizeof(pList->list[0]);
+	if (pList->length * sizeof(*pList->list) < pList->size) {
+
+		tmpsize = pList->length * sizeof(*pList->list);
 		tmpptr = realloc(pList->list, tmpsize);
 		if (tmpptr == NULL)
-			return;
+			return PYROS_ERROR_OOM;
 
 		pList->list = tmpptr;
 		pList->size = tmpsize;
 	}
+	return PYROS_OK;
+}
+
+enum PYROS_ERROR
+Pyros_List_Grow(PyrosList *pList, size_t requested_len) {
+	void *tmpptr;
+	size_t new_size;
+
+	assert(pList != NULL);
+	assert(pList->list != NULL);
+
+	new_size = sizeof(*pList->list) * requested_len;
+
+	if (pList->size < new_size) {
+		tmpptr = realloc(pList->list, new_size);
+		if (tmpptr == NULL)
+			return PYROS_ERROR_OOM;
+
+		pList->list = tmpptr;
+		pList->size = new_size;
+	}
+	return PYROS_OK;
 }
 
 enum PYROS_ERROR
 Pyros_List_Append(PyrosList *pList, void *ptr) {
 	void *tmpptr;
 
-	if (pList == NULL)
-		return PYROS_ERR;
+	assert(pList != NULL);
+	assert(pList->list != NULL);
 
 	pList->length++;
 
@@ -95,8 +119,7 @@ Pyros_List_Append(PyrosList *pList, void *ptr) {
 		if (tmpptr == NULL) {
 			pList->size /= 2;
 			pList->length--;
-			fprintf(stderr, "Error allocating memory");
-			return PYROS_ALLOCATION_ERROR;
+			return PYROS_ERROR_OOM;
 		}
 		pList->list = tmpptr;
 	}
@@ -106,12 +129,16 @@ Pyros_List_Append(PyrosList *pList, void *ptr) {
 	return PYROS_OK;
 }
 
-void
+enum PYROS_ERROR
 Pyros_List_RShift(PyrosList **pList, size_t shift) {
 	size_t i;
 
-	if (pList == NULL || *pList == NULL || shift >= (*pList)->length)
-		return;
+	assert(pList != NULL);
+	assert(*pList != NULL);
+	assert((*pList)->list != NULL);
+
+	if (shift >= (*pList)->length)
+		return PYROS_ERROR_INVALID_ARGUMENT;
 
 	for (i = 0; i < shift; i++)
 		free((*pList)->list[i]);
@@ -119,4 +146,6 @@ Pyros_List_RShift(PyrosList **pList, size_t shift) {
 	(*pList)->list++;
 	(*pList)->length--;
 	(*pList)->offset++;
+
+	return PYROS_OK;
 }

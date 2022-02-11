@@ -1,4 +1,6 @@
+#include <assert.h>
 #include <sqlite3.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,31 +23,43 @@ typedef struct PyrosMeta {
 
 struct PyrosTagRaw {
 	int isAlias;
-	sqlite3_int64 id;
+	int64_t id;
 	size_t par;
 };
 
 static PyrosTag *newPyrosTag(int isAlias, int parent);
-static void mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB, PyrosList *tagids,
-                                        PyrosList *ptaglist, const char *glob);
+static enum PYROS_ERROR mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB,
+                                                    PyrosList *tagids,
+                                                    PyrosList *ptaglist,
+                                                    const char *glob);
 static PyrosList *getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids,
                                     unsigned int flags);
-static void createTag(PyrosDB *pyrosDB, const char *tag);
-static void addTagRelation(PyrosDB *pyrosDB, int type, const char *tag1,
-                           const char *tag2);
+static enum PYROS_ERROR createTag(PyrosDB *pyrosDB, const char *tag);
+static enum PYROS_ERROR addTagRelation(PyrosDB *pyrosDB, int type,
+                                       const char *tag1, const char *tag2);
+static enum PYROS_ERROR Pyros_Add_Relation(PyrosDB *pyrosDB, const char *tag1,
+                                           const char *tag2, int type);
 
-int
+static PyrosList *getTagsFromTagIdList(PyrosDB *pyrosDB, PyrosList *tagids);
+
+int64_t
 Pyros_Get_Tag_Count(PyrosDB *pyrosDB) {
-	int filecount = -1;
+	int64_t filecount = -1;
 
-	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_QUERY_FILE_COUNT), 1,
-	                  SQL_INT, &filecount);
+	assert(pyrosDB != NULL);
+
+	if (sqlStmtGetResults(pyrosDB,
+	                      sqlGetStmt(pyrosDB, STMT_QUERY_FILE_COUNT),
+	                      &filecount) != PYROS_OK)
+		return -1;
 
 	return filecount;
 }
 
 void
 Pyros_Free_Tag(PyrosTag *tag) {
+	if (tag == NULL)
+		return;
 	free(tag->tag);
 	free(tag);
 }
@@ -55,13 +69,17 @@ newPyrosTag(int isAlias, int parent) {
 	PyrosTag *newTag;
 
 	newTag = malloc(sizeof(*newTag));
+	if (newTag == NULL)
+		return NULL;
+
 	newTag->isAlias = isAlias;
 	newTag->par = parent;
+	newTag->tag = NULL;
 
 	return newTag;
 }
 
-static void
+static enum PYROS_ERROR
 mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB, PyrosList *tagids,
                             PyrosList *ptaglist, const char *glob) {
 	sqlite3_stmt *Get_Relation_Tags;
@@ -69,17 +87,18 @@ mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB, PyrosList *tagids,
 	int has_glob = (glob != NULL);
 
 	if (tagids->length == 0)
-		return;
+		return PYROS_OK;
 
-	sqlPrepareStmt(pyrosDB, "SELECT tag FROM tag WHERE id=?;",
-	               &Get_Relation_Tags);
+	if (sqlPrepareStmt(pyrosDB, "SELECT tag FROM tag WHERE id=?;",
+	                   &Get_Relation_Tags) != PYROS_OK)
+		return pyrosDB->error;
 
 	if (has_glob) {
-		char *copy;
 		currentTag = ((PyrosTag *)ptaglist->list[0]);
-		copy = malloc(strlen(glob) + 1);
-		strcpy(copy, glob);
-		currentTag->tag = copy;
+		currentTag->tag = duplicate_str(glob);
+		if (currentTag->tag == NULL)
+			return setError(pyrosDB, PYROS_ERROR_OOM,
+			                "Out of memory");
 	}
 
 	for (size_t i = 0; i < tagids->length; i++) {
@@ -87,34 +106,49 @@ mergeTagidsIntoPyrosTagList(PyrosDB *pyrosDB, PyrosList *tagids,
 			currentTag = ((PyrosTag *)ptaglist->list[i + 1]);
 		else
 			currentTag = ((PyrosTag *)ptaglist->list[i]);
-		sqlBind(Get_Relation_Tags, FALSE, 1, SQL_INT64P,
-		        tagids->list[i]);
-		sqlStmtGetResults(Get_Relation_Tags, 1, SQL_CHAR,
-		                  &currentTag->tag);
+
+		if (sqlBind(pyrosDB, Get_Relation_Tags, FALSE, SQL_INT64P,
+		            tagids->list[i]) != PYROS_OK)
+			goto error;
+
+		if (sqlStmtGetResults(pyrosDB, Get_Relation_Tags,
+		                      &currentTag->tag) != PYROS_OK)
+			goto error;
 	}
 
 	sqlite3_finalize(Get_Relation_Tags);
+	return PYROS_OK;
+
+error:
+	return pyrosDB->error;
 }
 
 static PyrosList *
 getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
-	PyrosList *structured_tags;
+	PyrosList *structured_tags, *related_tags;
+	PyrosTag *tag;
 	size_t i;
 	size_t lastlength;
 
-	structured_tags = Pyros_Create_List(1, sizeof(PyrosTag *));
+	structured_tags = Pyros_Create_List(tagids->length + 1);
+	if (structured_tags == NULL)
+		goto error_oom;
+
 	if (tagids->length < 1)
 		return structured_tags;
 
 	if (flags & PYROS_GLOB) {
-		Pyros_List_Append(structured_tags, newPyrosTag(FALSE, -1));
-		for (i = 0; i < tagids->length; i++)
-			Pyros_List_Append(structured_tags,
-			                  newPyrosTag(FALSE, 0));
-	} else {
-		for (i = 0; i < tagids->length; i++)
-			Pyros_List_Append(structured_tags,
-			                  newPyrosTag(FALSE, -1));
+		tag = newPyrosTag(FALSE, -1);
+		if (tag == NULL)
+			goto error_oom;
+		Pyros_List_Append(structured_tags, newPyrosTag(FALSE, 0));
+	}
+
+	for (i = 0; i < tagids->length; i++) {
+		tag = newPyrosTag(FALSE, (flags & PYROS_GLOB) ? 0 : -1);
+		if (tag == NULL)
+			goto error_oom;
+		Pyros_List_Append(structured_tags, tag);
 	}
 
 	lastlength = tagids->length;
@@ -125,108 +159,417 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 			parent_pos++;
 
 		if (flags & PYROS_ALIAS) {
-			PyrosListMerge(
-			    tagids, Get_Aliased_Ids(pyrosDB, tagids->list[i]));
-			while (lastlength < tagids->length) {
-				Pyros_List_Append(
-				    structured_tags,
-				    newPyrosTag(TRUE, parent_pos));
-				lastlength++;
+			related_tags =
+			    Get_Aliased_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(
+				    related_tags,
+				    (Pyros_Free_Callback)Pyros_Free_Tag);
+				goto error_oom;
 			}
 		}
 
 		if (flags & PYROS_CHILD) {
-			PyrosListMerge(
-			    tagids, Get_Children_Ids(pyrosDB, tagids->list[i]));
-			while (lastlength < tagids->length) {
-				Pyros_List_Append(
-				    structured_tags,
-				    newPyrosTag(FALSE, parent_pos));
-				lastlength++;
+			related_tags =
+			    Get_Children_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(
+				    related_tags,
+				    (Pyros_Free_Callback)Pyros_Free_Tag);
+				goto error_oom;
 			}
 		}
 
 		if (flags & PYROS_PARENT) {
-			PyrosListMerge(
-			    tagids, Get_Parent_Ids(pyrosDB, tagids->list[i]));
-			while (lastlength < tagids->length) {
-				Pyros_List_Append(
-				    structured_tags,
-				    newPyrosTag(FALSE, parent_pos));
-				lastlength++;
+			related_tags = Get_Parent_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(
+				    related_tags,
+				    (Pyros_Free_Callback)Pyros_Free_Tag);
+				goto error_oom;
+			}
+		}
+
+		for (; lastlength < tagids->length; lastlength++) {
+			tag = newPyrosTag(flags & PYROS_ALIAS, parent_pos);
+			if (tag == NULL)
+				goto error_oom;
+
+			if (Pyros_List_Append(structured_tags, tag) !=
+			    PYROS_OK) {
+				free(tag);
+				goto error_oom;
 			}
 		}
 	}
 	return structured_tags;
+
+error_oom:
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+error:
+	Pyros_List_Free(structured_tags, (Pyros_Free_Callback)Pyros_Free_Tag);
+	return NULL;
 }
 
 PyrosList *
 Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
                        unsigned int flags) {
-	PyrosList *tagids;
-	PyrosList *structured_tags;
-	sqlite3_int64 *tagid = NULL;
-	char *tag = str_remove_whitespace(orig_tag);
+	PyrosList *tagids = NULL;
+	PyrosList *structured_tags = NULL;
+	int64_t *tagid = NULL;
+	char *tag;
+
+	assert(pyrosDB != NULL);
+	assert(orig_tag != NULL);
+
+	tag = str_remove_whitespace(orig_tag);
+
+	if (tag == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		return NULL;
+	}
 
 	if ((flags & PYROS_GLOB) && containsGlobChar(tag)) {
 		tagids = getTagIdByGlob(pyrosDB, tag);
+		if (tagids == NULL)
+			goto error;
 	} else {
-		tagids = Pyros_Create_List(1, sizeof(sqlite3_int64 *));
+		tagids = Pyros_Create_List(1);
+		if (tagids == NULL)
+			goto error;
+
 		tagid = getTagId(pyrosDB, tag);
+		if (tagid == NULL)
+			goto error;
+
 		free(tag);
 		tag = NULL;
 
 		flags &= ~PYROS_GLOB;
 		if (tagid != NULL) {
-			Pyros_List_Append(tagids, tagid);
+			if (Pyros_List_Append(tagids, tagid) != PYROS_OK) {
+				setError(pyrosDB, PYROS_ERROR_OOM,
+				         "Out of memory");
+				goto error;
+			}
 		} else {
 			return tagids;
 		}
 	}
 
 	structured_tags = getStructuredTags(pyrosDB, tagids, flags);
-	mergeTagidsIntoPyrosTagList(pyrosDB, tagids, structured_tags, tag);
+	if (structured_tags == NULL)
+		goto error;
+
+	if (mergeTagidsIntoPyrosTagList(pyrosDB, tagids, structured_tags,
+	                                NULL) != PYROS_OK)
+		goto error;
 
 	Pyros_List_Free(tagids, free);
 	free(tag);
 	return structured_tags;
+
+error:
+	Pyros_List_Free(structured_tags, (Pyros_Free_Callback)Pyros_Free_Tag);
+	Pyros_List_Free(tagids, free);
+	free(tag);
+	return NULL;
+}
+
+enum PYROS_ERROR
+mergeRelatedTagIds(PyrosDB *pyrosDB, PyrosList *tagids,
+                   enum PYROS_TAG_RELATION_FLAGS type) {
+	PyrosList *related_tags;
+	size_t i;
+
+	for (i = 0; i < tagids->length; i++) {
+		if (type & PYROS_ALIAS) {
+			related_tags =
+			    Get_Aliased_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(related_tags, free);
+				return setError(pyrosDB, PYROS_ERROR_OOM,
+				                "Out of memory");
+			}
+		}
+
+		if (type & PYROS_CHILD) {
+			related_tags =
+			    Get_Children_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(related_tags, free);
+				return setError(pyrosDB, PYROS_ERROR_OOM,
+				                "Out of memory");
+			}
+		}
+
+		if (type & PYROS_PARENT) {
+			related_tags = Get_Parent_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+				Pyros_List_Free(related_tags, free);
+				return setError(pyrosDB, PYROS_ERROR_OOM,
+				                "Out of memory");
+			}
+		}
+	}
+	return PYROS_OK;
+error:
+	return pyrosDB->error;
 }
 
 PyrosList *
 Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB, const char *orig_tag,
                               int showChildren, int ignoreGlobs) {
-	PyrosList *tagids;
-	sqlite3_int64 *tagid = NULL;
-	size_t i;
+	PyrosList *tagids = NULL;
+	int64_t *tagid = NULL;
 	PyrosList *tags;
-	char *cmd;
-	sqlite3_stmt *Get_Relation_Tags;
-	char *tag = str_remove_whitespace(orig_tag);
+	char *tag;
+
+	assert(pyrosDB != NULL);
+	assert(orig_tag != NULL);
+
+	tag = str_remove_whitespace(orig_tag);
+	if (tag == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		return NULL;
+	}
 
 	if (!ignoreGlobs && containsGlobChar(tag)) {
 		tagids = getTagIdByGlob(pyrosDB, tag);
+		if (tagids == NULL)
+			goto error;
 	} else {
-		tagids = Pyros_Create_List(1, sizeof(char *));
+		tagids = Pyros_Create_List(1);
+		if (tagids == NULL)
+			goto error;
+
 		tagid = getTagId(pyrosDB, tag);
-		if (tagid != NULL) {
-			Pyros_List_Append(tagids, tagid);
+		if (tagid == NULL) {
+			if (pyrosDB->error != PYROS_OK) {
+				goto error;
+			} else if (Pyros_List_Append(tagids, tagid) !=
+			           PYROS_OK) {
+				free(tagid);
+				goto error;
+			}
 		}
 	}
-	for (i = 0; i < tagids->length; i++) {
-		PyrosListMerge(tagids,
-		               Get_Aliased_Ids(pyrosDB, tagids->list[i]));
-		if (showChildren)
-			PyrosListMerge(
-			    tagids, Get_Children_Ids(pyrosDB, tagids->list[i]));
-		else
-			PyrosListMerge(
-			    tagids, Get_Parent_Ids(pyrosDB, tagids->list[i]));
+
+	if (mergeRelatedTagIds(
+	        pyrosDB, tagids,
+	        PYROS_ALIAS | (showChildren ? PYROS_CHILD : PYROS_PARENT)) !=
+	    PYROS_OK)
+		goto error;
+
+	tags = getTagsFromTagIdList(pyrosDB, tagids);
+	free(tag);
+	Pyros_List_Free(tagids, free);
+	return tags;
+
+error:
+	free(tag);
+	Pyros_List_Free(tagids, free);
+	return NULL;
+}
+
+static enum PYROS_ERROR
+Pyros_Add_Relation(PyrosDB *pyrosDB, const char *tag1, const char *tag2,
+                   int type) {
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
+
+	return sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_ADD_RELATION), TRUE,
+	               SQL_CHAR, tag1, SQL_CHAR, tag2, SQL_INT, type);
+}
+
+static enum PYROS_ERROR
+createTag(PyrosDB *pyrosDB, const char *tag) {
+	return sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_ADD_TAG), TRUE,
+	               SQL_CHAR, tag);
+}
+
+static enum PYROS_ERROR
+addTagRelation(PyrosDB *pyrosDB, int type, const char *orig_tag1,
+               const char *orig_tag2) {
+	int cmp;
+	char *tag1;
+	char *tag2;
+
+	assert(pyrosDB != NULL);
+	assert(orig_tag1 != NULL);
+	assert(orig_tag2 != NULL);
+
+	tag1 = str_remove_whitespace(orig_tag1);
+	tag2 = str_remove_whitespace(orig_tag2);
+
+	if (tag1 == NULL || tag2 == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		goto error;
 	}
+
+	cmp = strcmp(tag2, tag1);
+	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0) {
+		if (createTag(pyrosDB, tag1) != PYROS_OK)
+			goto error;
+		if (createTag(pyrosDB, tag2) != PYROS_OK)
+			goto error;
+
+		if (cmp > 0) {
+			if (Pyros_Add_Relation(pyrosDB, tag1, tag2, type) !=
+			    PYROS_OK)
+				goto error;
+		} else {
+			if (type == TAG_TYPE_CHILD)
+				type = TAG_TYPE_PARENT;
+			else if (type == TAG_TYPE_CHILD)
+				type = TAG_TYPE_CHILD;
+
+			if (Pyros_Add_Relation(pyrosDB, tag2, tag1, type) !=
+			    PYROS_OK)
+				goto error;
+		}
+	}
+
+	free(tag1);
+	free(tag2);
+	return PYROS_OK;
+
+error:
+	free(tag1);
+	free(tag2);
+	return pyrosDB->error;
+}
+
+enum PYROS_ERROR
+Pyros_Add_Alias(PyrosDB *pyrosDB, const char *tag1, const char *tag2) {
+	return addTagRelation(pyrosDB, TAG_TYPE_ALIAS, tag1, tag2);
+}
+enum PYROS_ERROR
+Pyros_Add_Parent(PyrosDB *pyrosDB, const char *child, const char *parent) {
+	return addTagRelation(pyrosDB, TAG_TYPE_PARENT, child, parent);
+}
+enum PYROS_ERROR
+Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child) {
+	return addTagRelation(pyrosDB, TAG_TYPE_CHILD, parent, child);
+}
+
+enum PYROS_ERROR
+Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash,
+                           const char *orig_tag) {
+	char *tag;
+	int res;
+
+	assert(pyrosDB != NULL);
+	assert(hash != NULL);
+	assert(orig_tag != NULL);
+
+	tag = str_remove_whitespace(orig_tag);
+	if (tag == NULL)
+		return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
+
+	res = sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_REMOVE_TAG_FROM_FILE),
+	              TRUE, SQL_CHAR, hash, SQL_CHAR, tag);
+
+	free(tag);
+	return res;
+}
+
+enum PYROS_ERROR
+Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
+	assert(hash != NULL);
+	assert(pyrosDB != NULL);
+
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
+
+	return sqlBind(pyrosDB,
+	               sqlGetStmt(pyrosDB, STMT_REMOVE_ALL_TAGS_FROM_FILE),
+	               TRUE, SQL_CHAR, hash);
+}
+
+enum PYROS_ERROR
+Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc) {
+	size_t i;
+	char *tag = NULL;
+	int is_anti_tag = FALSE;
+
+	assert(pyrosDB != NULL);
+
+	if (tagc == 0)
+		return PYROS_OK;
+
+	assert(tags != NULL);
+	assert(hash != NULL);
+
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		goto error;
+
+	for (i = 0; i < tagc; i++) {
+		tag = str_remove_whitespace(tags[i]);
+		if (tag == NULL)
+			return setError(pyrosDB, PYROS_ERROR_OOM,
+			                "Out of memory");
+		if (tag[0] != '\0') {
+			if (tag[0] == '-')
+				is_anti_tag = TRUE;
+
+			if (createTag(pyrosDB, tag + is_anti_tag) != PYROS_OK)
+				goto error;
+
+			if (sqlBind(pyrosDB,
+			            sqlGetStmt(pyrosDB, STMT_ADD_TAG_TO_FILE),
+			            TRUE, SQL_CHAR, hash, SQL_CHAR,
+			            tag + is_anti_tag, SQL_INT,
+			            is_anti_tag) != PYROS_OK)
+				goto error;
+		}
+		free(tag);
+	}
+
+	return PYROS_OK;
+
+error:
+	free(tag);
+	return pyrosDB->error;
+}
+
+PyrosList *
+Pyros_Get_All_Tags(PyrosDB *pyrosDB) {
+	assert(pyrosDB != NULL);
+	return sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_ALL_TAGS));
+}
+
+static PyrosList *
+getTagsFromTagIdList(PyrosDB *pyrosDB, PyrosList *tagids) {
+	PyrosList *tags;
+	sqlite3_stmt *Get_Relation_Tags = NULL;
+	char *cmd = NULL;
+	size_t i;
+
 	cmd = malloc(sizeof(*cmd) *
 	             (strlen("SELECT tag FROM tag WHERE id IN ();") +
 	              (tagids->length * 2) + 1));
-	strcpy(cmd, "SELECT tag FROM tag WHERE id IN (");
+	if (cmd == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		goto error;
+	}
 
+	strcpy(cmd, "SELECT tag FROM tag WHERE id IN (");
 	for (i = 0; i < tagids->length; i++) {
 		if (i != 0)
 			strcat(cmd, ",?");
@@ -234,191 +577,75 @@ Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB, const char *orig_tag,
 			strcat(cmd, "?");
 	}
 	strcat(cmd, ");");
-	sqlPrepareStmt(pyrosDB, cmd, &Get_Relation_Tags);
+
+	if (sqlPrepareStmt(pyrosDB, cmd, &Get_Relation_Tags) != PYROS_OK)
+		goto error;
 
 	sqlBindList(Get_Relation_Tags, tagids, SQL_INT64P);
-	tags = sqlStmtGetAll(Get_Relation_Tags, SQL_CHAR);
+
+	tags = sqlStmtGetAll(pyrosDB, Get_Relation_Tags);
+	if (tags == NULL)
+		goto error;
 
 	free(cmd);
-	free(tag);
-	Pyros_List_Free(tagids, free);
 	sqlite3_finalize(Get_Relation_Tags);
-
 	return tags;
-}
-
-void
-Pyros_Add_Relation(PyrosDB *pyrosDB, const char *tag1, const char *tag2,
-                   int type) {
-	sqlStartTransaction(pyrosDB);
-
-	sqlBind(sqlGetStmt(pyrosDB, STMT_ADD_RELATION), TRUE, 3, SQL_CHAR, tag1,
-	        SQL_CHAR, tag2, SQL_INT, type);
-}
-
-static void
-createTag(PyrosDB *pyrosDB, const char *tag) {
-	sqlBind(sqlGetStmt(pyrosDB, STMT_ADD_TAG), TRUE, 1, SQL_CHAR, tag);
-}
-
-static void
-addTagRelation(PyrosDB *pyrosDB, int type, const char *orig_tag1,
-               const char *orig_tag2) {
-	int cmp;
-	char *tag1 = str_remove_whitespace(orig_tag1);
-	char *tag2 = str_remove_whitespace(orig_tag2);
-
-	cmp = strcmp(tag2, tag1);
-	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0) {
-		createTag(pyrosDB, tag1);
-		createTag(pyrosDB, tag2);
-		if (cmp > 0) {
-			Pyros_Add_Relation(pyrosDB, tag1, tag2, type);
-		} else {
-			switch (type) {
-			case TAG_TYPE_CHILD:
-				Pyros_Add_Relation(pyrosDB, tag2, tag1,
-				                   TAG_TYPE_PARENT);
-				break;
-			case TAG_TYPE_PARENT:
-				Pyros_Add_Relation(pyrosDB, tag2, tag1,
-				                   TAG_TYPE_CHILD);
-				break;
-			case TAG_TYPE_ALIAS:
-				Pyros_Add_Relation(pyrosDB, tag2, tag1,
-				                   TAG_TYPE_ALIAS);
-			}
-		}
-	}
-
-	free(tag1);
-	free(tag2);
-}
-
-void
-Pyros_Add_Alias(PyrosDB *pyrosDB, const char *tag1, const char *tag2) {
-	addTagRelation(pyrosDB, TAG_TYPE_ALIAS, tag1, tag2);
-}
-void
-Pyros_Add_Parent(PyrosDB *pyrosDB, const char *child, const char *parent) {
-	addTagRelation(pyrosDB, TAG_TYPE_PARENT, child, parent);
-}
-void
-Pyros_Add_Child(PyrosDB *pyrosDB, const char *parent, const char *child) {
-	addTagRelation(pyrosDB, TAG_TYPE_CHILD, parent, child);
-}
-
-void
-Pyros_Remove_Tag_From_Hash(PyrosDB *pyrosDB, const char *hash,
-                           const char *orig_tag) {
-	char *tag = str_remove_whitespace(orig_tag);
-
-	sqlStartTransaction(pyrosDB);
-
-	sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_TAG_FROM_FILE), TRUE, 2,
-	        SQL_CHAR, hash, SQL_CHAR, tag);
-
-	free(tag);
-}
-
-void
-Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
-	sqlStartTransaction(pyrosDB);
-
-	sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_ALL_TAGS_FROM_FILE), TRUE, 1,
-	        SQL_CHAR, hash);
-}
-
-int
-Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc) {
-	size_t i;
-
-	if (tagc == 0)
-		return PYROS_OK;
-
-	sqlStartTransaction(pyrosDB);
-
-	for (i = 0; i < tagc; i++) {
-		char *tag = str_remove_whitespace(tags[i]);
-		if (tag[0] != '\0') {
-			if (tag[0] == '-') {
-				createTag(pyrosDB, &tag[1]);
-				sqlBind(
-				    sqlGetStmt(pyrosDB, STMT_ADD_TAG_TO_FILE),
-				    TRUE, 3, SQL_CHAR, hash, SQL_CHAR, &tag[1],
-				    SQL_INT, TRUE);
-
-			} else {
-				createTag(pyrosDB, tag);
-				sqlBind(
-				    sqlGetStmt(pyrosDB, STMT_ADD_TAG_TO_FILE),
-				    TRUE, 3, SQL_CHAR, hash, SQL_CHAR, tag,
-				    SQL_INT, FALSE);
-			}
-		}
-		free(tag);
-	}
-	return PYROS_OK;
-}
-
-PyrosList *
-Pyros_Get_All_Tags(PyrosDB *pyrosDB) {
-	return sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_ALL_TAGS),
-	                     SQL_CHAR);
+error:
+	free(cmd);
+	sqlite3_finalize(Get_Relation_Tags);
+	return NULL;
 }
 
 PyrosList *
 Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
                                 int showRelated) {
-	PyrosList *tags;
-	PyrosList *final_tags;
+	PyrosList *tagids = NULL, *related_tags, *tags;
 	size_t i;
-	char *cmd;
-	int cmdlength;
 
-	sqlite3_stmt *Query_Tag_By_Id;
+	assert(pyrosDB != NULL);
+	assert(hash != NULL);
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE, 1, SQL_CHAR,
-	        hash);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE,
+	            SQL_CHAR, hash) != PYROS_OK)
+		goto error;
 
-	tags = sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH),
-	                     SQL_INT64P);
+	tagids =
+	    sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH));
 
-	if (tags == NULL)
-		return NULL;
+	if (tagids == NULL)
+		goto error;
 
-	cmdlength =
-	    strlen("SELECT tag FROM tag WHERE id IN () ORDER BY tag") + 1;
-	for (i = 0; i < tags->length; i++) {
-		if (showRelated) {
-			PyrosStrListMerge(
-			    tags, Get_Aliased_Ids(pyrosDB, tags->list[i]));
-			PyrosStrListMerge(
-			    tags, Get_Parent_Ids(pyrosDB, tags->list[i]));
+	if (showRelated) {
+		for (i = 0; i < tagids->length; i++) {
+			related_tags =
+			    Get_Aliased_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+
+			if (PyrosStrListMerge(tagids, related_tags) !=
+			    PYROS_OK) {
+				Pyros_List_Free(related_tags, free);
+				goto error;
+			}
+
+			related_tags = Get_Parent_Ids(pyrosDB, tagids->list[i]);
+			if (related_tags == NULL)
+				goto error;
+
+			if (PyrosStrListMerge(tagids, related_tags) !=
+			    PYROS_OK) {
+				Pyros_List_Free(related_tags, free);
+				goto error;
+			}
 		}
-		cmdlength += 3;
 	}
 
-	cmd = malloc(sizeof(*cmd) * cmdlength);
-	strcpy(cmd, "SELECT tag FROM tag WHERE  id IN (");
-
-	for (i = 0; i < tags->length; i++) {
-		strcat(cmd, "?");
-		if (i + 1 < tags->length)
-			strcat(cmd, ",");
-	}
-	strcat(cmd, ") ORDER BY tag");
-
-	sqlPrepareStmt(pyrosDB, cmd, &Query_Tag_By_Id);
-	free(cmd);
-
-	sqlBindList(Query_Tag_By_Id, tags, SQL_INT64P);
-
-	final_tags = sqlStmtGetAll(Query_Tag_By_Id, SQL_CHAR);
-	Pyros_List_Free(tags, free);
-	sqlite3_finalize(Query_Tag_By_Id);
-
-	return final_tags;
+	tags = getTagsFromTagIdList(pyrosDB, tagids);
+	Pyros_List_Free(tagids, free);
+	return tags;
+error:
+	Pyros_List_Free(tagids, free);
+	return NULL;
 }
 
 PyrosList *
@@ -426,112 +653,181 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
 	PyrosList *tags;
 	PyrosList *structured_tags;
 
-	;
+	assert(pyrosDB != NULL);
+	assert(hash != NULL);
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE, 1, SQL_CHAR,
-	        hash);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE,
+	            SQL_CHAR, hash) != PYROS_OK)
+		return NULL;
 
-	tags = sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH),
-	                     SQL_INT64P);
+	tags =
+	    sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH));
 
 	if (tags == NULL)
 		return NULL;
 
 	structured_tags =
 	    getStructuredTags(pyrosDB, tags, PYROS_FILE_RELATIONSHIP);
-	mergeTagidsIntoPyrosTagList(pyrosDB, tags, structured_tags, NULL);
+	if (structured_tags == NULL) {
+		Pyros_List_Free(tags, free);
+		return NULL;
+	}
+
+	if (mergeTagidsIntoPyrosTagList(pyrosDB, tags, structured_tags, NULL) !=
+	    PYROS_OK) {
+		Pyros_List_Free(tags, free);
+		Pyros_List_Free(structured_tags,
+		                (Pyros_Free_Callback)Pyros_Free_Tag);
+		return NULL;
+	}
+
 	Pyros_List_Free(tags, free);
 	return structured_tags;
 }
 
 PyrosList *
-getRelatedTagIds(PyrosDB *pyrosDB, sqlite3_int64 *tag, int type1, int type2) {
-	PyrosList *pList;
+getRelatedTagIds(PyrosDB *pyrosDB, int64_t *tag, int type1, int type2) {
+	PyrosList *pList = NULL, *pList2;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_RELATION1), FALSE, 2, SQL_INT,
-	        type1, SQL_INT64P, tag);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_RELATION1), FALSE,
+	            SQL_INT, type1, SQL_INT64P, tag) != PYROS_OK)
+		goto error;
 
-	pList = sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_RELATION1),
-	                      SQL_INT64P);
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_RELATION2), FALSE, 2, SQL_INT,
-	        type2, SQL_INT64P, tag);
+	pList =
+	    sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_RELATION1));
+	if (pList == NULL)
+		goto error;
 
-	PyrosListMerge(pList,
-	               sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_RELATION2),
-	                             SQL_INT64P));
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_RELATION2), FALSE,
+	            SQL_INT, type2, SQL_INT64P, tag) != PYROS_OK)
+		goto error;
+
+	pList2 =
+	    sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_RELATION2));
+	if (pList2 == NULL)
+		goto error;
+
+	if (PyrosListMerge(pList, pList2) != PYROS_OK) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		Pyros_List_Free(pList2, free);
+		goto error;
+	}
 
 	return pList;
+
+error:
+	Pyros_List_Free(pList, free);
+	return NULL;
 }
 
 PyrosList *
-Get_Aliased_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag) {
+Get_Aliased_Ids(PyrosDB *pyrosDB, int64_t *tag) {
 	return getRelatedTagIds(pyrosDB, tag, TAG_TYPE_ALIAS, TAG_TYPE_ALIAS);
 }
 
 PyrosList *
-Get_Children_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag) {
+Get_Children_Ids(PyrosDB *pyrosDB, int64_t *tag) {
 	return getRelatedTagIds(pyrosDB, tag, TAG_TYPE_CHILD, TAG_TYPE_PARENT);
 }
 
 PyrosList *
-Get_Parent_Ids(PyrosDB *pyrosDB, sqlite3_int64 *tag) {
+Get_Parent_Ids(PyrosDB *pyrosDB, int64_t *tag) {
 	return getRelatedTagIds(pyrosDB, tag, TAG_TYPE_PARENT, TAG_TYPE_CHILD);
 }
 
 PyrosList *
 getTagIdByGlob(PyrosDB *pyrosDB, const char *tag) {
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID_BY_GLOB), FALSE, 1,
-	        SQL_CHAR, tag);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID_BY_GLOB),
+	            FALSE, SQL_CHAR, tag) != PYROS_OK)
+		return NULL;
 
-	return sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID_BY_GLOB),
-	                     SQL_INT64P);
+	return sqlStmtGetAll(pyrosDB,
+	                     sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID_BY_GLOB));
 }
 
-sqlite3_int64 *
+int64_t *
 getTagId(PyrosDB *pyrosDB, const char *tag) {
-	sqlite3_int64 *id = NULL;
+	int64_t *ptr_id = NULL;
+	int64_t id = -1;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID), FALSE, 1, SQL_CHAR,
-	        tag);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID), FALSE,
+	            SQL_CHAR, tag) != PYROS_OK)
+		goto error;
 
-	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID), 1, SQL_INT64P,
-	                  &id);
+	if (sqlStmtGetResults(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_ID),
+	                      &id) != PYROS_OK)
+		goto error;
 
-	return id;
+	if (id == -1)
+		return NULL;
+
+	ptr_id = malloc(sizeof(*ptr_id));
+	if (ptr_id == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		goto error;
+	}
+
+	*ptr_id = id;
+
+	return ptr_id;
+
+error:
+	return NULL;
 }
 
 PyrosList *
 GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
                PyrosList *(*getRelatedIds)()) {
-	PyrosList *relatedTags = Pyros_Create_List(1, sizeof(char *));
-	PyrosList *foundTags;
-	char *cmd;
+	PyrosList *relatedTags = Pyros_Create_List(1);
+	PyrosList *foundTags = NULL;
+	char *cmd = NULL;
 	int cmdlength;
-	sqlite3_int64 *id;
+	int64_t *id;
 
 	size_t i;
-	sqlite3_stmt *Get_Tags_From_Ids;
+	sqlite3_stmt *Get_Tags_From_Ids = NULL;
+
+	assert(tag != NULL);
+	assert(pyrosDB != NULL);
 
 	id = getTagId(pyrosDB, tag);
-	if (id == NULL)
-		return relatedTags;
-
-	Pyros_List_Append(relatedTags, id);
-
-	cmdlength = strlen("SELECT tag FROM tag WHERE id IN ()") + 1;
-	for (i = 0; i < relatedTags->length; i++) {
-		PyrosStrListMerge(
-		    relatedTags,
-		    (*getRelatedIds)(pyrosDB, relatedTags->list[i]));
-		cmdlength += 2;
+	if (id == NULL) {
+		if (pyrosDB->error != PYROS_OK)
+			return relatedTags;
+		else
+			goto error;
 	}
 
-	Pyros_List_RShift(&relatedTags, 1);
+	if (Pyros_List_Append(relatedTags, id) != PYROS_OK) {
+		free(id);
+		goto error;
+	}
+
+	for (i = 0; i < relatedTags->length; i++) {
+		if (PyrosStrListMerge(
+		        relatedTags,
+		        (*getRelatedIds)(pyrosDB, relatedTags->list[i])) !=
+		    PYROS_OK) {
+			setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+			goto error;
+		}
+	}
+
 	if (relatedTags->length == 0)
 		return relatedTags;
 
-	/* BAD MALLOC */
+	cmdlength = strlen("SELECT tag FROM tag WHERE id IN ()") + 1 +
+	            (relatedTags->length * 2);
+
+	Pyros_List_RShift(&relatedTags, 1);
+
 	cmd = malloc(sizeof(*cmd) * cmdlength);
+
+	if (cmd == NULL) {
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		goto error;
+	}
+
 	strcpy(cmd, "SELECT tag FROM tag WHERE id IN (");
 
 	for (i = 0; i < relatedTags->length; i++) {
@@ -540,16 +836,29 @@ GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
 			strcat(cmd, ",");
 	}
 	strcat(cmd, ")");
-	sqlPrepareStmt(pyrosDB, cmd, &Get_Tags_From_Ids);
+
+	if (sqlPrepareStmt(pyrosDB, cmd, &Get_Tags_From_Ids) != PYROS_OK)
+		goto error;
 
 	sqlBindList(Get_Tags_From_Ids, relatedTags, SQL_INT64P);
-	foundTags = sqlStmtGetAll(Get_Tags_From_Ids, SQL_CHAR);
+	foundTags = sqlStmtGetAll(pyrosDB, Get_Tags_From_Ids);
+
+	if (foundTags == NULL) {
+		sqlite3_finalize(Get_Tags_From_Ids);
+		goto error;
+	}
 
 	free(cmd);
 	Pyros_List_Free(relatedTags, free);
 	sqlite3_finalize(Get_Tags_From_Ids);
 
 	return foundTags;
+
+error:
+	free(cmd);
+	Pyros_List_Free(relatedTags, free);
+	Pyros_List_Free(foundTags, free);
+	return NULL;
 }
 
 PyrosList *
@@ -565,38 +874,55 @@ Pyros_Get_Children(PyrosDB *pyrosDB, const char *tag) {
 	return GetRelatedTags(pyrosDB, tag, &Get_Children_Ids);
 }
 
-void
+enum PYROS_ERROR
 Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
                               const char *tag2) {
 	int cmp;
 
-	sqlStartTransaction(pyrosDB);
+	assert(pyrosDB != NULL);
+	assert(tag1 != NULL);
+	assert(tag2 != NULL);
+
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
 
 	cmp = strcmp(tag2, tag1);
-	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0) {
-		if (cmp > 0) {
-			sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_RELATION), TRUE,
-			        2, SQL_CHAR, tag1, SQL_CHAR, tag2);
-		} else {
-			sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_RELATION), TRUE,
-			        2, SQL_CHAR, tag2, SQL_CHAR, tag1);
-		}
-	}
+	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0)
+		return PYROS_OK;
+
+	if (cmp > 0)
+		return sqlBind(pyrosDB,
+		               sqlGetStmt(pyrosDB, STMT_REMOVE_RELATION), TRUE,
+		               SQL_CHAR, tag1, SQL_CHAR, tag2);
+	else
+		return sqlBind(pyrosDB,
+		               sqlGetStmt(pyrosDB, STMT_REMOVE_RELATION), TRUE,
+		               SQL_CHAR, tag2, SQL_CHAR, tag1);
 }
 
-void
+enum PYROS_ERROR
 Pyros_Remove_Dead_Tags(PyrosDB *pyrosDB) {
-	sqlStartTransaction(pyrosDB);
+	assert(pyrosDB != NULL);
 
-	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_REMOVE_DEAD_TAG), 0);
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
+
+	return sqlStmtGetResults(pyrosDB,
+	                         sqlGetStmt(pyrosDB, STMT_REMOVE_DEAD_TAG));
 }
 
-void
+enum PYROS_ERROR
 Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2) {
-	PyrosList *tags =
-	    Pyros_Get_Tags_From_Hash_Simple(pyrosDB, hash1, FALSE);
+	PyrosList *tags;
 
-	if (tags != NULL)
-		Pyros_Add_Tag(pyrosDB, hash2, (char **)tags->list,
-		              tags->length);
+	assert(pyrosDB != NULL);
+	assert(hash1 != NULL);
+	assert(hash2 != NULL);
+
+	tags = Pyros_Get_Tags_From_Hash_Simple(pyrosDB, hash1, FALSE);
+
+	if (tags == NULL)
+		return pyrosDB->error;
+
+	return Pyros_Add_Tag(pyrosDB, hash2, (char **)tags->list, tags->length);
 }

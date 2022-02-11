@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <fcntl.h>
 #include <magic.h>
 #include <stdio.h>
@@ -19,8 +20,7 @@
 
 static void importFile(char *file, char *path);
 static void removeFile(char *path);
-static char *getHash(const char *file, PyrosDB *pyrosDB);
-static void getFileExt(char fileext[], const char *file);
+static const char *getFileExt(const char *file);
 static char *getMime(const char *file);
 static size_t getFileSize(const char *file);
 static int isFile(const char *path);
@@ -41,52 +41,19 @@ removeFile(char *path) {
 		remove(path);
 }
 
-static char *
-getHash(const char *file, PyrosDB *pyrosDB) {
-	char *filehash;
+static const char *
+getFileExt(const char *file) {
+	size_t i;
+	int len = strlen(file);
 
-	switch (pyrosDB->hashtype) {
-	case PYROS_MD5HASH:
-		filehash = getMD5(file);
-		break;
-	case PYROS_SHA1HASH:
-		filehash = getSHA1(file);
-		break;
-	case PYROS_SHA256HASH:
-		filehash = getSHA256(file);
-		break;
-	case PYROS_SHA512HASH:
-		filehash = getSHA512(file);
-		break;
-	case PYROS_BLAKE2BHASH:
-		filehash = getBLAKE2B(file);
-		break;
-	case PYROS_BLAKE2SHASH:
-		filehash = getBLAKE2S(file);
-		break;
-	default:
-		return NULL;
+	for (i = len; i > 0; i--) {
+		if (file[i] == '/' || file[i - 1] == '/' || i == 1)
+			return &file[len];
+		else if (file[i] == '.')
+			return &file[i + 1];
 	}
 
-	return filehash;
-}
-
-static void
-getFileExt(char fileext[], const char *file) {
-	size_t i, j;
-
-	fileext[0] = '\0';
-	for (i = strlen(file); i > 0; i--) {
-		if (file[i] == '/' || file[i - 1] == '/' || i == 1) {
-			break;
-		} else if (file[i] == '.') {
-			i++;
-			for (j = 0; i <= strlen(file); j++, i++) {
-				fileext[j] = file[i];
-			}
-			break;
-		}
-	}
+	return &file[len];
 }
 
 static char *
@@ -99,9 +66,7 @@ getMime(const char *file) {
 	magic_load(magic_cookie, NULL);
 
 	filemime = magic_file(magic_cookie, file);
-	returnMime = malloc(sizeof(*returnMime) * (strlen(filemime) + 1));
-	if (returnMime != NULL)
-		strcpy(returnMime, filemime);
+	returnMime = duplicate_str(filemime);
 
 	magic_close(magic_cookie);
 	return returnMime;
@@ -124,53 +89,75 @@ isFile(const char *path) {
 
 char *
 Pyros_Add(PyrosDB *pyrosDB, const char *filePath) {
-	char *file;
+	char *file = NULL;
 	char *is_merged = NULL;
 	size_t filetime;
 	size_t filesize;
-	char fileext[strlen(filePath) + 1];
+	const char *fileext;
 	char *filehash;
-	char *filepath;
-	char *filemime;
+	char *filepath = NULL;
+	char *filemime = NULL;
+
+	assert(pyrosDB != NULL);
+	assert(pyrosDB->hashtype != PYROS_UNKOWNHASH);
+	assert(filePath != NULL);
 
 	if (!isFile(filePath)) {
-		return NULL;
+		setError(pyrosDB, PYROS_ERROR_INVALID_ARGUMENT,
+		         "File does not exist");
+		goto error;
 	}
 
-	file = malloc(sizeof(*file) * (strlen(filePath) + 1));
-	if (file == NULL) {
-		return NULL;
-	}
-	strcpy(file, filePath);
+	file = duplicate_str(filePath);
+	if (file == NULL)
+		goto error_oom;
 
-	filehash = getHash(file, pyrosDB);
-	if (filehash == NULL) {
-		free(file);
-		return NULL;
-	}
+	filehash = getHash(pyrosDB->hashtype, file);
+	if (filehash == NULL)
+		goto error_oom;
 
 	is_merged = Pyros_Check_If_Merged(pyrosDB, filehash);
 	if (is_merged != NULL) {
 		free(file);
+		free(filehash);
 		return is_merged;
+	} else if (pyrosDB->error != PYROS_OK) {
+		goto error;
 	}
 
 	filemime = getMime(file);
-	getFileExt(fileext, file);
+	if (filemime == NULL)
+		goto error_oom;
+
+	fileext = getFileExt(file);
 	filepath = getFilePath(pyrosDB, filehash, fileext);
+	if (filepath == NULL)
+		goto error_oom;
+
 	filetime = time(NULL);
 	filesize = getFileSize(file);
 
-	sqlStartTransaction(pyrosDB);
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		goto error;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_ADD_FILE), TRUE, 5, SQL_CHAR, filehash,
-	        SQL_INT64, filetime, SQL_CHAR, filemime, SQL_CHAR, fileext,
-	        SQL_INT64, filesize);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_ADD_FILE), TRUE, SQL_CHAR,
+	            filehash, SQL_INT64, filetime, SQL_CHAR, filemime, SQL_CHAR,
+	            fileext, SQL_INT64, filesize) != PYROS_OK)
+		goto error;
 
-	addHook(pyrosDB, &importFile, file, filepath, &free);
+	if (addHook(pyrosDB, &importFile, file, filepath, &free) != PYROS_OK)
+		goto error;
 
 	free(filemime);
 	return filehash;
+
+error_oom:
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+error:
+	free(filepath);
+	free(filehash);
+	free(filemime);
+	return NULL;
 }
 
 static enum PYROS_ERROR
@@ -190,17 +177,13 @@ importTagsFromTagFile(PyrosDB *pyrosDB, char *filepath,
 	if (tagFilePath == NULL)
 		goto error;
 
-	sprintf(tagFilePath, "%s.txt", filepath);
-
-	if (!isFile(tagFilePath)) {
-		free(tagFilePath);
-		return PYROS_OK;
-	}
+	strcpy(tagFilePath, filepath);
+	strcat(tagFilePath, ".txt");
 
 	tagFile = fopen(tagFilePath, "r");
 	if (tagFile == NULL) {
-		perror("Error reading tag file");
-		goto error;
+		free(tagFilePath);
+		return PYROS_OK;
 	}
 
 	tagbuffer = malloc(buffersize);
@@ -213,7 +196,9 @@ importTagsFromTagFile(PyrosDB *pyrosDB, char *filepath,
 
 			if (filebuf[i] == '\n') {
 				tagbuffer[buf_index] = '\0';
-				Pyros_List_Append(tagFileTags, tagbuffer);
+				if (Pyros_List_Append(tagFileTags, tagbuffer) !=
+				    PYROS_OK)
+					goto error;
 				tagbuffer = malloc(buffersize);
 
 				buf_index = 0;
@@ -236,22 +221,30 @@ importTagsFromTagFile(PyrosDB *pyrosDB, char *filepath,
 
 	if (lastchar != '\n') {
 		tagbuffer[buf_index] = '\0';
-		Pyros_List_Append(tagFileTags, tagbuffer);
+		if (Pyros_List_Append(tagFileTags, tagbuffer) != PYROS_OK)
+			goto error;
 	} else {
 		free(tagbuffer);
 	}
 
 	fclose(tagFile);
 
-	addHook(pyrosDB, &removeFile, tagFilePath, NULL, free);
+	if (addHook(pyrosDB, &removeFile, tagFilePath, NULL, free) !=
+	    PYROS_OK) {
+		free(tagbuffer);
+		free(tagFilePath);
+		Pyros_List_Free(tagFileTags, free);
+		return pyrosDB->error;
+	}
 
 	return PYROS_OK;
 
 error:
+	fclose(tagFile);
 	free(tagbuffer);
 	free(tagFilePath);
 	Pyros_List_Free(tagFileTags, free);
-	return PYROS_ALLOCATION_ERROR;
+	return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 }
 
 static int
@@ -281,50 +274,62 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec, char *tags[],
 	size_t i;
 	char *hash;
 
-	files = Pyros_Create_List(filec, sizeof(char *));
+	assert(pyrosDB != NULL);
+
+	files = Pyros_Create_List(filec);
 	if (files == NULL)
-		goto error;
+		goto error_oom;
 
 	for (i = 0; i < filec; i++) {
+		assert(filePaths[i] != NULL);
 		if (!(useTagfile && isTagFile(filePaths, filec, i))) {
-			Pyros_List_Append(files, filePaths[i]);
+			if (Pyros_List_Append(files, filePaths[i]) != PYROS_OK)
+				goto error_oom;
 		}
 	}
 
 	if (returnHashes) {
-		hashes = Pyros_Create_List(files->length, sizeof(char *));
+		hashes = Pyros_Create_List(files->length);
 		if (hashes == NULL)
-			goto error;
+			goto error_oom;
 	}
 
-	if (useTagfile &&
-	    (tagFileTags = Pyros_Create_List(1, sizeof(char *))) == NULL)
-		goto error;
+	if (useTagfile && (tagFileTags = Pyros_Create_List(1)) == NULL)
+		goto error_oom;
 
 	for (i = 0; i < files->length; i++) {
 		if (useTagfile &&
 		    importTagsFromTagFile(pyrosDB, files->list[i],
 		                          tagFileTags) != PYROS_OK) {
-			continue;
+			goto error;
 		}
 
 		hash = Pyros_Add(pyrosDB, files->list[i]);
 		if (hash != NULL) {
-			Pyros_Add_Tag(pyrosDB, hash, (char **)tagFileTags->list,
-			              tagFileTags->length);
+			if (Pyros_Add_Tag(pyrosDB, hash,
+			                  (char **)tagFileTags->list,
+			                  tagFileTags->length) != PYROS_OK)
+				goto error;
 
-			Pyros_Add_Tag(pyrosDB, hash, (char **)tags, tagc);
+			if (Pyros_Add_Tag(pyrosDB, hash, (char **)tags, tagc) !=
+			    PYROS_OK)
+				goto error;
 
 			if (callback != NULL)
 				(*callback)(hash, files->list[i], i,
 				            callback_data);
 
 			if (returnHashes &&
-			    !PyrosListContainsStr(hashes, hash, NULL))
-				Pyros_List_Append(hashes, hash);
-			else
+			    !PyrosListContainsStr(hashes, hash, NULL)) {
+				if (Pyros_List_Append(hashes, hash) != PYROS_OK)
+					goto error_oom;
+			} else {
 				free(hash);
+			}
+		} else if (pyrosDB->error != PYROS_OK) {
+			goto error;
 		}
+
 		Pyros_List_Clear(tagFileTags, &free);
 	}
 
@@ -332,6 +337,9 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec, char *tags[],
 	Pyros_List_Free(files, NULL);
 
 	return hashes;
+
+error_oom:
+	setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 error:
 	Pyros_List_Free(tagFileTags, &free);
 	Pyros_List_Free(files, NULL);
@@ -341,100 +349,119 @@ error:
 
 PyrosList *
 Pyros_Get_All_Hashes(PyrosDB *pyrosDB) {
-	return sqlStmtGetAll(sqlGetStmt(pyrosDB, STMT_QUERY_ALL_HASH),
-	                     SQL_CHAR);
+	assert(pyrosDB != NULL);
+	return sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_ALL_HASH));
 }
 
 PyrosFile *
 Pyros_Get_File_From_Hash(PyrosDB *pyrosDB, const char *hash) {
-	int result;
 	PyrosFile *pFile;
 
-	if (hash == NULL)
-		return NULL;
+	assert(pyrosDB != NULL);
+	assert(hash != NULL);
 
 	pFile = malloc(sizeof(*pFile));
 	if (pFile == NULL) {
-		return NULL;
+		setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+		goto error;
 	}
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_FILE_FROM_HASH), FALSE, 1,
-	        SQL_CHAR, hash);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_FILE_FROM_HASH),
+	            FALSE, SQL_CHAR, hash) != PYROS_OK)
+		goto error;
 
-	result = sqlStmtGetResults(
-	    sqlGetStmt(pyrosDB, STMT_QUERY_FILE_FROM_HASH), 5, SQL_CHAR,
-	    &pFile->hash, SQL_CHAR, &pFile->mime, SQL_CHAR, &pFile->ext,
-	    SQL_INT64, &pFile->import_time, SQL_INT64, &pFile->file_size);
+	if (sqlStmtGetResults(
+	        pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_FILE_FROM_HASH),
+	        &pFile->hash, &pFile->mime, &pFile->ext, &pFile->import_time,
+	        &pFile->file_size) != PYROS_OK)
+		goto error;
 
 	if (pFile->hash == NULL) {
 		free(pFile);
 		return NULL;
 	}
 
-	if (result == PYROS_OK) {
-		pFile->path = getFilePath(pyrosDB, pFile->hash, pFile->ext);
-		return pFile;
-	} else {
-		free(pFile);
-		return NULL;
-	}
+	pFile->path = getFilePath(pyrosDB, pFile->hash, pFile->ext);
+	if (pFile->path == NULL)
+		goto error;
+
+	return pFile;
+error:
+	free(pFile);
+	return NULL;
 }
 
-int
+int64_t
 Pyros_Get_File_Count(PyrosDB *pyrosDB) {
-	int filecount = -1;
+	int64_t filecount = -1;
 
-	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_QUERY_HASH_COUNT), 1,
-	                  SQL_INT, &filecount);
+	assert(pyrosDB != NULL);
+
+	if (sqlStmtGetResults(pyrosDB,
+	                      sqlGetStmt(pyrosDB, STMT_QUERY_HASH_COUNT),
+	                      &filecount) != PYROS_OK)
+		return -1;
 
 	return filecount;
 }
 
-void
+enum PYROS_ERROR
 Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile) {
 	char *file_path;
 
-	if (pFile == NULL)
-		return;
+	assert(pyrosDB != NULL);
+	assert(pFile != NULL);
 
-	sqlStartTransaction(pyrosDB);
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
 
-	Pyros_Remove_All_Tags_From_Hash(pyrosDB, pFile->hash);
+	if (Pyros_Remove_All_Tags_From_Hash(pyrosDB, pFile->hash) != PYROS_OK)
+		return pyrosDB->error;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_REMOVE_FILE), TRUE, 1, SQL_CHAR,
-	        pFile->hash);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_REMOVE_FILE), TRUE,
+	            SQL_CHAR, pFile->hash) != PYROS_OK)
+		return pyrosDB->error;
 
-	file_path = malloc(strlen(pFile->path) + 1);
-	strcpy(file_path, pFile->path);
+	file_path = duplicate_str(pFile->path);
+	if (file_path == NULL)
+		return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 
-	addHook(pyrosDB, &removeFile, file_path, NULL, free);
+	return addHook(pyrosDB, &removeFile, file_path, NULL, free);
 }
 
-void
+enum PYROS_ERROR
 Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,
                    int copytags) {
+	assert(pyrosDB != NULL);
+	assert(masterHash != NULL);
+	assert(hash2 != NULL);
+
 	if (!strcmp(masterHash, hash2))
-		return;
+		return PYROS_OK;
 
-	sqlStartTransaction(pyrosDB);
+	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
+		return pyrosDB->error;
 
-	if (copytags)
-		Pyros_Copy_Tags(pyrosDB, hash2, masterHash);
+	if (copytags && Pyros_Copy_Tags(pyrosDB, hash2, masterHash) != PYROS_OK)
+		return pyrosDB->error;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_MERGE_HASH), TRUE, 2, SQL_CHAR,
-	        masterHash, SQL_CHAR, hash2);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_MERGE_HASH), TRUE,
+	            SQL_CHAR, masterHash, SQL_CHAR, hash2) != PYROS_OK)
+		return pyrosDB->error;
 
-	Pyros_Remove_File(pyrosDB, Pyros_Get_File_From_Hash(pyrosDB, hash2));
+	if (Pyros_Remove_File(
+	        pyrosDB, Pyros_Get_File_From_Hash(pyrosDB, hash2)) != PYROS_OK)
+		return pyrosDB->error;
 
 	/* if hash2 is a masterhash update all files merged with it to new
 	 * masterhash*/
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_UPDATE_MERGED), TRUE, 2, SQL_CHAR,
-	        masterHash, SQL_CHAR, hash2);
+	return sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_UPDATE_MERGED), TRUE,
+	               SQL_CHAR, masterHash, SQL_CHAR, hash2);
 }
 
 void
-Pyros_Close_File(PyrosFile *pFile) {
+Pyros_Free_File(PyrosFile *pFile) {
 	if (pFile == NULL)
 		return;
 	free(pFile->hash);
@@ -448,34 +475,24 @@ PyrosFile *
 Pyros_Duplicate_File(PyrosFile *pFile) {
 	PyrosFile *newFile;
 
-	if (pFile == NULL)
-		return NULL;
+	assert(pFile != NULL);
 
 	newFile = malloc(sizeof(*newFile));
-
 	if (newFile == NULL)
 		return NULL;
 
 	*newFile = *pFile; /* copy non-pointer values */
-	newFile->ext = NULL;
-	newFile->hash = NULL;
-	newFile->path = NULL;
+	newFile->ext = duplicate_str(pFile->ext);
+	newFile->mime = duplicate_str(pFile->mime);
+	newFile->hash = duplicate_str(pFile->hash);
+	newFile->path = duplicate_str(pFile->path);
 
-	if ((newFile->path = malloc(strlen(pFile->path) + 1)) == NULL ||
-	    (newFile->hash = malloc(strlen(pFile->hash) + 1)) == NULL ||
-	    (newFile->ext = malloc(strlen(pFile->ext) + 1)) == NULL ||
-	    (newFile->mime = malloc(strlen(pFile->mime) + 1)) == NULL) {
-		free(newFile->ext);
-		free(newFile->hash);
-		free(newFile->path);
-		free(newFile);
+	if (newFile->path == NULL || newFile->hash == NULL ||
+	    newFile->ext == NULL || newFile->mime == NULL) {
+		Pyros_Free_File(pFile);
 		return NULL;
 	}
 
-	strcpy(newFile->path, pFile->path);
-	strcpy(newFile->hash, pFile->hash);
-	strcpy(newFile->ext, pFile->ext);
-	strcpy(newFile->mime, pFile->mime);
 	return newFile;
 }
 
@@ -483,11 +500,17 @@ char *
 Pyros_Check_If_Merged(PyrosDB *pyrosDB, const char *filehash) {
 	char *masterhash = NULL;
 
-	sqlBind(sqlGetStmt(pyrosDB, STMT_QUERY_MERGE_MASTER), FALSE, 1,
-	        SQL_CHAR, filehash);
+	assert(pyrosDB != NULL);
+	assert(filehash != NULL);
 
-	sqlStmtGetResults(sqlGetStmt(pyrosDB, STMT_QUERY_MERGE_MASTER), 1,
-	                  SQL_CHAR, &masterhash);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_MERGE_MASTER),
+	            FALSE, SQL_CHAR, filehash) != PYROS_OK)
+		return NULL;
+
+	if (sqlStmtGetResults(pyrosDB,
+	                      sqlGetStmt(pyrosDB, STMT_QUERY_MERGE_MASTER),
+	                      &masterhash) != PYROS_OK)
+		return NULL;
 
 	return masterhash;
 }
