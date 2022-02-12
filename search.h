@@ -45,6 +45,8 @@ typedef struct {
 	enum Order_Type order;
 	int page;
 	int pageSize;
+	int normal_group_count;
+	int meta_group_count;
 } querySettings;
 
 #endif

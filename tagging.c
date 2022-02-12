@@ -47,6 +47,7 @@ Pyros_Get_Tag_Count(PyrosDB *pyrosDB) {
 	int64_t filecount = -1;
 
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, -1);
 
 	if (sqlStmtGetResults(pyrosDB,
 	                      sqlGetStmt(pyrosDB, STMT_QUERY_FILE_COUNT),
@@ -169,6 +170,17 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 				    (Pyros_Free_Callback)Pyros_Free_Tag);
 				goto error_oom;
 			}
+			for (; lastlength < tagids->length; lastlength++) {
+				tag = newPyrosTag(flags & TRUE, parent_pos);
+				if (tag == NULL)
+					goto error_oom;
+
+				if (Pyros_List_Append(structured_tags, tag) !=
+				    PYROS_OK) {
+					free(tag);
+					goto error_oom;
+				}
+			}
 		}
 
 		if (flags & PYROS_CHILD) {
@@ -182,6 +194,17 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 				    (Pyros_Free_Callback)Pyros_Free_Tag);
 				goto error_oom;
 			}
+			for (; lastlength < tagids->length; lastlength++) {
+				tag = newPyrosTag(flags & FALSE, parent_pos);
+				if (tag == NULL)
+					goto error_oom;
+
+				if (Pyros_List_Append(structured_tags, tag) !=
+				    PYROS_OK) {
+					free(tag);
+					goto error_oom;
+				}
+			}
 		}
 
 		if (flags & PYROS_PARENT) {
@@ -194,17 +217,16 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 				    (Pyros_Free_Callback)Pyros_Free_Tag);
 				goto error_oom;
 			}
-		}
+			for (; lastlength < tagids->length; lastlength++) {
+				tag = newPyrosTag(flags & FALSE, parent_pos);
+				if (tag == NULL)
+					goto error_oom;
 
-		for (; lastlength < tagids->length; lastlength++) {
-			tag = newPyrosTag(flags & PYROS_ALIAS, parent_pos);
-			if (tag == NULL)
-				goto error_oom;
-
-			if (Pyros_List_Append(structured_tags, tag) !=
-			    PYROS_OK) {
-				free(tag);
-				goto error_oom;
+				if (Pyros_List_Append(structured_tags, tag) !=
+				    PYROS_OK) {
+					free(tag);
+					goto error_oom;
+				}
 			}
 		}
 	}
@@ -227,6 +249,7 @@ Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
 
 	assert(pyrosDB != NULL);
 	assert(orig_tag != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	tag = str_remove_whitespace(orig_tag);
 
@@ -339,6 +362,7 @@ Pyros_Get_Related_Tags_Simple(PyrosDB *pyrosDB, const char *orig_tag,
 
 	assert(pyrosDB != NULL);
 	assert(orig_tag != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	tag = str_remove_whitespace(orig_tag);
 	if (tag == NULL) {
@@ -551,6 +575,7 @@ error:
 PyrosList *
 Pyros_Get_All_Tags(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 	return sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_ALL_TAGS));
 }
 
@@ -604,6 +629,7 @@ Pyros_Get_Tags_From_Hash_Simple(PyrosDB *pyrosDB, const char *hash,
 
 	assert(pyrosDB != NULL);
 	assert(hash != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE,
 	            SQL_CHAR, hash) != PYROS_OK)
@@ -655,6 +681,7 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
 
 	assert(pyrosDB != NULL);
 	assert(hash != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_TAG_BY_HASH), FALSE,
 	            SQL_CHAR, hash) != PYROS_OK)
@@ -789,6 +816,7 @@ GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
 
 	assert(tag != NULL);
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	id = getTagId(pyrosDB, tag);
 	if (id == NULL) {
@@ -882,6 +910,7 @@ Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
 	assert(pyrosDB != NULL);
 	assert(tag1 != NULL);
 	assert(tag2 != NULL);
+	RETURN_IF_ERR(pyrosDB);
 
 	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
 		return pyrosDB->error;
@@ -903,6 +932,7 @@ Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
 enum PYROS_ERROR
 Pyros_Remove_Dead_Tags(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR(pyrosDB);
 
 	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
 		return pyrosDB->error;
@@ -918,6 +948,7 @@ Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2) {
 	assert(pyrosDB != NULL);
 	assert(hash1 != NULL);
 	assert(hash2 != NULL);
+	RETURN_IF_ERR(pyrosDB);
 
 	tags = Pyros_Get_Tags_From_Hash_Simple(pyrosDB, hash1, FALSE);
 

@@ -65,6 +65,9 @@ typedef void (*Pyros_Add_Full_Callback)(const char *, const char *, size_t,
                                         void *);
 typedef void (*Pyros_Free_Callback)(void *);
 
+static const char PYROS_SEARCH_KEYWORDS[][9] = {
+    "limit", "page", "explicit", "ext", "tagcount", "mime", "hash", "order"};
+
 /* Database functions */
 PyrosDB *Pyros_Alloc_Database(char *path);
 enum PYROS_ERROR Pyros_Create_Database(PyrosDB *pyrosDB,
@@ -73,6 +76,7 @@ enum PYROS_ERROR Pyros_Open_Database(PyrosDB *pyrosDB);
 enum PYROS_ERROR Pyros_Close_Database(PyrosDB *pyrosDB);
 int Pyros_Database_Exists(const char *path);
 enum PYROS_ERROR Pyros_Commit(PyrosDB *pyrosDB);
+enum PYROS_ERROR Pyros_Rollback(PyrosDB *pyrosDB);
 enum PYROS_ERROR Pyros_Vacuum_Database(PyrosDB *pyrosDB);
 const char *Pyros_Get_Database_Path(PyrosDB *pyrosDB);
 enum PYROS_HASHTYPE Pyros_Get_Hash_Type(PyrosDB *pyrosDB);

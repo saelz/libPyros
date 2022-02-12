@@ -7,6 +7,7 @@
 
 #include "libpyros.h"
 #include "pyros.h"
+#include "search.h"
 #include "sqlite.h"
 #include "str.h"
 
@@ -106,10 +107,12 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     " id NOT IN (SELECT tag FROM tagrelations)"
     " AND id NOT IN (SELECT tag2 FROM tagrelations)"
     " AND id NOT IN (SELECT tagid FROM tags)",
+
     // STMT_VACUUM
     "VACUUM"
 
-};
+    // STMT_ROLLBACK
+    "ROLLBACK"};
 
 static enum PYROS_ERROR
 setSQLError(PyrosDB *pyrosDB, int rc) {
@@ -371,12 +374,14 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
             querySettings qSet) {
 	size_t i, j;
 	size_t pos = 1;
+	int group_count = 0;
 
 	assert(stmt != NULL);
 
 	for (i = 0; i < tagc; i++) {
 		switch (prcsTags[i].type) {
 		case TT_NORMAL:
+			group_count++;
 			for (j = 0; j < prcsTags[i].meta.tags->length; j++) {
 				sqlite3_bind_int64(stmt, pos,
 				                   *(sqlite3_int64 *)prcsTags[i]
@@ -384,7 +389,21 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 				pos++;
 			}
 			break;
+		case TT_HASH:
+		case TT_MIME:
+		case TT_EXT:
+			group_count++;
+			sqlite3_bind_text(stmt, pos, prcsTags[i].meta.text, -1,
+			                  NULL);
+			break;
 		case TT_TAGCOUNT:
+			if (prcsTags[i].meta.stat.min ==
+			    prcsTags[i].meta.stat.max) {
+				sqlite3_bind_int(stmt, pos,
+				                 prcsTags[i].meta.stat.min);
+				pos++;
+				break;
+			}
 			if (prcsTags[i].meta.stat.min >= 0) {
 				sqlite3_bind_int(stmt, pos,
 				                 prcsTags[i].meta.stat.min);
@@ -405,6 +424,7 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 			break;
 		}
 	}
+
 	if (qSet.pageSize > 0) {
 		sqlite3_bind_int(stmt, pos, qSet.pageSize);
 		pos++;

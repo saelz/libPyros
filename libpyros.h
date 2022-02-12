@@ -16,11 +16,19 @@
 
 #define RETURN_IF_ERR(pyrosDB)                                                 \
 	if (pyrosDB->error != PYROS_OK)                                        \
-		return pyrosDB->error;
+		return pyrosDB->error;                                         \
+	if (pyrosDB->database == NULL)                                         \
+		return setError(pyrosDB, PYROS_ERROR_INVALID_ARGUMENT,         \
+		                "No database currently open");
 
 #define RETURN_IF_ERR_WRET(pyrosDB, ret)                                       \
 	if (pyrosDB->error != PYROS_OK)                                        \
-		return ret;
+		return ret;                                                    \
+	if (pyrosDB->database == NULL) {                                       \
+		setError(pyrosDB, PYROS_ERROR_INVALID_ARGUMENT,                \
+		         "No database currently open");                        \
+		return ret;                                                    \
+	}
 
 typedef struct sqlite3 sqlite3;
 typedef struct sqlite3_stmt sqlite3_stmt;

@@ -51,6 +51,7 @@ PyrosDB *
 Pyros_Alloc_Database(char *path) {
 	PyrosDB *pyrosDB = NULL;
 	sqlite3_stmt **stmts = NULL;
+	PyrosList *hooks = NULL;
 	int i;
 
 	assert(path != NULL);
@@ -61,7 +62,7 @@ Pyros_Alloc_Database(char *path) {
 	if ((stmts = malloc(sizeof(*stmts) * STMT_COUNT)) == NULL)
 		goto error;
 
-	if ((pyrosDB->hook = Pyros_Create_List(1)) == NULL)
+	if ((hooks = Pyros_Create_List(1)) == NULL)
 		goto error;
 
 	if ((pyrosDB->path = duplicate_str(path)) == NULL)
@@ -74,6 +75,7 @@ Pyros_Alloc_Database(char *path) {
 	for (i = 0; i < STMT_COUNT; i++)
 		stmts[i] = NULL;
 
+	pyrosDB->hook = hooks;
 	pyrosDB->commands = stmts;
 	pyrosDB->database = NULL;
 	pyrosDB->error = PYROS_OK;
@@ -85,6 +87,7 @@ Pyros_Alloc_Database(char *path) {
 error:
 	free(pyrosDB);
 	free(stmts);
+	Pyros_List_Free(hooks, NULL);
 	return NULL;
 }
 
@@ -96,7 +99,7 @@ Pyros_Open_Database(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
 
 	if (pyrosDB->database != NULL)
-		return PYROS_ERROR_INVALID_ARGUMENT;
+		return PYROS_OK;
 
 	ret = sqlInitDB(pyrosDB, FALSE);
 	if (ret != PYROS_OK)
@@ -177,7 +180,7 @@ Pyros_Close_Database(PyrosDB *pyrosDB) {
 enum PYROS_ERROR
 Pyros_Commit(PyrosDB *pyrosDB) {
 	PyrosHook *hook;
-	int ret;
+	int ret = PYROS_OK;
 	size_t i;
 
 	assert(pyrosDB != NULL);
@@ -202,6 +205,22 @@ Pyros_Commit(PyrosDB *pyrosDB) {
 	}
 	return ret;
 }
+enum PYROS_ERROR
+Pyros_Rollback(PyrosDB *pyrosDB) {
+	int ret = PYROS_OK;
+
+	assert(pyrosDB != NULL);
+
+	if (pyrosDB->inTransaction) {
+
+		ret = sqlStmtGetResults(pyrosDB,
+		                        sqlGetStmt(pyrosDB, STMT_ROLLBACK), 0);
+		pyrosDB->inTransaction = FALSE;
+		Pyros_List_Clear(pyrosDB->hook, (Pyros_Free_Callback)freeHook);
+	}
+
+	return ret;
+}
 
 enum PYROS_ERROR
 Pyros_Create_Database(PyrosDB *pyrosDB, enum PYROS_HASHTYPE hashtype) {
@@ -211,6 +230,9 @@ Pyros_Create_Database(PyrosDB *pyrosDB, enum PYROS_HASHTYPE hashtype) {
 	int ret;
 
 	assert(pyrosDB != NULL);
+
+	if (pyrosDB->database != NULL)
+		return PYROS_OK;
 
 	pathlen = strlen(pyrosDB->path);
 	dbpath = malloc(pathlen + strlen(DBFILE));
@@ -269,8 +291,7 @@ enum PYROS_ERROR
 Pyros_Vacuum_Database(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
 
-	if (pyrosDB->database == NULL)
-		return PYROS_ERROR_INVALID_ARGUMENT;
+	RETURN_IF_ERR(pyrosDB);
 
 	return sqlStmtGetResults(pyrosDB, sqlGetStmt(pyrosDB, STMT_VACUUM), 0);
 }
@@ -279,6 +300,8 @@ const char *
 Pyros_Get_Database_Path(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
 
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
+
 	return pyrosDB->path;
 }
 
@@ -286,8 +309,7 @@ enum PYROS_HASHTYPE
 Pyros_Get_Hash_Type(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
 
-	if (pyrosDB->database == NULL)
-		return PYROS_UNKOWNHASH;
+	RETURN_IF_ERR_WRET(pyrosDB, PYROS_UNKOWNHASH);
 
 	return pyrosDB->hashtype;
 }
@@ -332,7 +354,7 @@ setError(PyrosDB *pyrosDB, enum PYROS_ERROR error, const char *message) {
 	if (msg_len > pyrosDB->error_msg_len) {
 		pyrosDB->error_msg_len = msg_len;
 		pyrosDB->error_msg =
-		    realloc(pyrosDB->error_msg, pyrosDB->error_msg_len);
+		    realloc(pyrosDB->error_msg, pyrosDB->error_msg_len + 1);
 	}
 
 	strcpy(pyrosDB->error_msg, message);

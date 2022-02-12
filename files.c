@@ -102,6 +102,8 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath) {
 	assert(pyrosDB->hashtype != PYROS_UNKOWNHASH);
 	assert(filePath != NULL);
 
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
+
 	if (!isFile(filePath)) {
 		setError(pyrosDB, PYROS_ERROR_INVALID_ARGUMENT,
 		         "File does not exist");
@@ -275,6 +277,7 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec, char *tags[],
 	char *hash;
 
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	files = Pyros_Create_List(filec);
 	if (files == NULL)
@@ -350,6 +353,8 @@ error:
 PyrosList *
 Pyros_Get_All_Hashes(PyrosDB *pyrosDB) {
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
+
 	return sqlStmtGetAll(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_ALL_HASH));
 }
 
@@ -359,6 +364,7 @@ Pyros_Get_File_From_Hash(PyrosDB *pyrosDB, const char *hash) {
 
 	assert(pyrosDB != NULL);
 	assert(hash != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	pFile = malloc(sizeof(*pFile));
 	if (pFile == NULL) {
@@ -396,6 +402,7 @@ Pyros_Get_File_Count(PyrosDB *pyrosDB) {
 	int64_t filecount = -1;
 
 	assert(pyrosDB != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, -1);
 
 	if (sqlStmtGetResults(pyrosDB,
 	                      sqlGetStmt(pyrosDB, STMT_QUERY_HASH_COUNT),
@@ -411,6 +418,7 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile) {
 
 	assert(pyrosDB != NULL);
 	assert(pFile != NULL);
+	RETURN_IF_ERR(pyrosDB);
 
 	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
 		return pyrosDB->error;
@@ -435,6 +443,7 @@ Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,
 	assert(pyrosDB != NULL);
 	assert(masterHash != NULL);
 	assert(hash2 != NULL);
+	RETURN_IF_ERR(pyrosDB);
 
 	if (!strcmp(masterHash, hash2))
 		return PYROS_OK;
@@ -502,6 +511,7 @@ Pyros_Check_If_Merged(PyrosDB *pyrosDB, const char *filehash) {
 
 	assert(pyrosDB != NULL);
 	assert(filehash != NULL);
+	RETURN_IF_ERR_WRET(pyrosDB, NULL);
 
 	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_QUERY_MERGE_MASTER),
 	            FALSE, SQL_CHAR, filehash) != PYROS_OK)
