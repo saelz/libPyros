@@ -24,9 +24,10 @@ static const char *getFileExt(const char *file);
 static char *getMime(const char *file);
 static size_t getFileSize(const char *file);
 static int isFile(const char *path);
-static enum PYROS_ERROR importTagsFromTagFile(PyrosDB *pyrosDB, char *filepath,
+static enum PYROS_ERROR importTagsFromTagFile(PyrosDB *pyrosDB,
+                                              const char *filepath,
                                               PyrosList *tagFileTags);
-static int isTagFile(char *filePaths[], size_t filec, size_t p);
+static int isTagFile(const char *filePaths[], size_t filec, size_t p);
 
 static void
 importFile(char *file, char *path) {
@@ -163,7 +164,7 @@ error:
 }
 
 static enum PYROS_ERROR
-importTagsFromTagFile(PyrosDB *pyrosDB, char *filepath,
+importTagsFromTagFile(PyrosDB *pyrosDB, const char *filepath,
                       PyrosList *tagFileTags) {
 	size_t buf_index = 0;
 	size_t buffersize = 20;
@@ -250,7 +251,7 @@ error:
 }
 
 static int
-isTagFile(char *filePaths[], size_t filec, size_t p) {
+isTagFile(const char *filePaths[], size_t filec, size_t p) {
 	size_t i;
 	size_t filelen = strlen(filePaths[p]) - 4;
 
@@ -267,9 +268,10 @@ isTagFile(char *filePaths[], size_t filec, size_t p) {
 }
 
 PyrosList *
-Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec, char *tags[],
-               size_t tagc, int useTagfile, int returnHashes,
-               Pyros_Add_Full_Callback callback, void *callback_data) {
+Pyros_Add_Full(PyrosDB *pyrosDB, const char *filePaths[], size_t filec,
+               const char *tags[], size_t tagc, int useTagfile,
+               int returnHashes, Pyros_Add_Full_Callback callback,
+               void *callback_data) {
 	PyrosList *files = NULL;
 	PyrosList *hashes = NULL;
 	PyrosList *tagFileTags = NULL;
@@ -310,11 +312,11 @@ Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec, char *tags[],
 		hash = Pyros_Add(pyrosDB, files->list[i]);
 		if (hash != NULL) {
 			if (Pyros_Add_Tag(pyrosDB, hash,
-			                  (char **)tagFileTags->list,
+			                  (const char **)tagFileTags->list,
 			                  tagFileTags->length) != PYROS_OK)
 				goto error;
 
-			if (Pyros_Add_Tag(pyrosDB, hash, (char **)tags, tagc) !=
+			if (Pyros_Add_Tag(pyrosDB, hash, tags, tagc) !=
 			    PYROS_OK)
 				goto error;
 
@@ -481,7 +483,7 @@ Pyros_Free_File(PyrosFile *pFile) {
 }
 
 PyrosFile *
-Pyros_Duplicate_File(PyrosFile *pFile) {
+Pyros_Duplicate_File(const PyrosFile *pFile) {
 	PyrosFile *newFile;
 
 	assert(pFile != NULL);
@@ -498,7 +500,7 @@ Pyros_Duplicate_File(PyrosFile *pFile) {
 
 	if (newFile->path == NULL || newFile->hash == NULL ||
 	    newFile->ext == NULL || newFile->mime == NULL) {
-		Pyros_Free_File(pFile);
+		Pyros_Free_File(newFile);
 		return NULL;
 	}
 

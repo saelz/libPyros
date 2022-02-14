@@ -1,4 +1,4 @@
-WARNING +=-Wall -Werror -Wextra -Wdeclaration-after-statement
+WARNING +=-Wall -Werror -Wextra -Wdeclaration-after-statement -Wnull-dereference -Wmissing-prototypes -Wpointer-arith -Wcast-qual
 
 BUILD_NAME = libpyros.so
 LIBS =-lsqlite3 -lcrypto -lmagic

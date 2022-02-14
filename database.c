@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "database.h"
 #include "libpyros.h"
 #include "pyros.h"
 #include "sqlite.h"
@@ -48,7 +49,7 @@ freeHook(PyrosHook *hook) {
 }
 
 PyrosDB *
-Pyros_Alloc_Database(char *path) {
+Pyros_Alloc_Database(const char *path) {
 	PyrosDB *pyrosDB = NULL;
 	sqlite3_stmt **stmts = NULL;
 	PyrosList *hooks = NULL;
@@ -179,7 +180,7 @@ Pyros_Close_Database(PyrosDB *pyrosDB) {
 
 enum PYROS_ERROR
 Pyros_Commit(PyrosDB *pyrosDB) {
-	PyrosHook *hook;
+	const PyrosHook *hook;
 	int ret = PYROS_OK;
 	size_t i;
 

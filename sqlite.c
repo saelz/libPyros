@@ -52,8 +52,8 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     "SELECT tag FROM tag;",
 
     // STMT_QUERY_TAG_BY_HASH
-	"SELECT tagid FROM tags LEFT JOIN hashes ON tags.hashid = hashes.id WHERE "
-	"hash=? AND isantitag=0;",
+    "SELECT tagid FROM tags LEFT JOIN hashes ON tags.hashid = hashes.id WHERE "
+    "hash=? AND isantitag=0;",
 
     // STMT_QUERY_TAG_ID_BY_GLOB
     "SELECT id FROM tag WHERE tag GLOB LOWER(?);",
@@ -364,8 +364,9 @@ sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_BIND_TYPE type) {
 			sqlite3_bind_text(stmt, i + 1, pList->list[i], -1,
 			                  NULL);
 		else if (type == SQL_INT64P)
-			sqlite3_bind_int64(stmt, i + 1,
-			                   *(sqlite3_int64 *)pList->list[i]);
+			sqlite3_bind_int64(
+			    stmt, i + 1,
+			    *(const sqlite3_int64 *)pList->list[i]);
 	}
 }
 
@@ -383,9 +384,10 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 		case TT_NORMAL:
 			group_count++;
 			for (j = 0; j < prcsTags[i].meta.tags->length; j++) {
-				sqlite3_bind_int64(stmt, pos,
-				                   *(sqlite3_int64 *)prcsTags[i]
-				                        .meta.tags->list[j]);
+				sqlite3_bind_int64(
+				    stmt, pos,
+				    *(const sqlite3_int64 *)prcsTags[i]
+				         .meta.tags->list[j]);
 				pos++;
 			}
 			break;
@@ -458,7 +460,7 @@ sqlStmtGetResults(PyrosDB *pyrosDB, sqlite3_stmt *stmt, ...) {
 			case SQLITE_TEXT:
 				strptr = va_arg(list, char **);
 				*strptr = duplicate_str(
-				    (char *)sqlite3_column_text(stmt, i));
+				    (const char *)sqlite3_column_text(stmt, i));
 				if (*strptr == NULL)
 					goto error_oom;
 
@@ -504,11 +506,11 @@ sqlStmtGetAllFiles(PyrosDB *pyrosDB, sqlite3_stmt *stmt) {
 			goto error_oom;
 
 		pFile->hash =
-		    duplicate_str((char *)sqlite3_column_text(stmt, 0));
+		    duplicate_str((const char *)sqlite3_column_text(stmt, 0));
 		pFile->mime =
-		    duplicate_str((char *)sqlite3_column_text(stmt, 1));
+		    duplicate_str((const char *)sqlite3_column_text(stmt, 1));
 		pFile->ext =
-		    duplicate_str((char *)sqlite3_column_text(stmt, 2));
+		    duplicate_str((const char *)sqlite3_column_text(stmt, 2));
 		pFile->import_time = sqlite3_column_int64(stmt, 3);
 		pFile->file_size = sqlite3_column_int64(stmt, 4);
 
@@ -552,7 +554,6 @@ sqlStmtGetAll(PyrosDB *pyrosDB, sqlite3_stmt *stmt) {
 	PyrosList *items;
 	int rc;
 	sqlite3_int64 *intptr;
-	char *str;
 	char *newstr;
 	int type;
 
@@ -571,8 +572,8 @@ sqlStmtGetAll(PyrosDB *pyrosDB, sqlite3_stmt *stmt) {
 
 	while (rc == SQLITE_ROW) {
 		if (type == SQLITE_TEXT) {
-			str = (char *)sqlite3_column_text(stmt, 0);
-			newstr = duplicate_str(str);
+			newstr = duplicate_str(
+			    (const char *)sqlite3_column_text(stmt, 0));
 			if (newstr == NULL)
 				goto error_oom;
 

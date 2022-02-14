@@ -36,7 +36,6 @@ void
 Pyros_List_Free(PyrosList *pList, Pyros_Free_Callback cb) {
 	size_t i;
 	if (pList != NULL) {
-
 		if (cb != NULL)
 			for (i = 0; i < pList->length; i++)
 				cb(pList->list[i]);
@@ -104,9 +103,14 @@ Pyros_List_Grow(PyrosList *pList, size_t requested_len) {
 	return PYROS_OK;
 }
 
+union constlistconvert {
+	void **list;
+	const void **cons;
+};
 enum PYROS_ERROR
-Pyros_List_Append(PyrosList *pList, void *ptr) {
+Pyros_List_Append(PyrosList *pList, const void *ptr) {
 	void *tmpptr;
+	union constlistconvert const_list;
 
 	assert(pList != NULL);
 	assert(pList->list != NULL);
@@ -124,13 +128,14 @@ Pyros_List_Append(PyrosList *pList, void *ptr) {
 		pList->list = tmpptr;
 	}
 
-	pList->list[pList->length - 1] = ptr;
+	const_list.list = pList->list;
+	const_list.cons[pList->length - 1] = ptr;
 	pList->list[pList->length] = NULL;
 	return PYROS_OK;
 }
 
 enum PYROS_ERROR
-Pyros_List_RShift(PyrosList **pList, size_t shift) {
+Pyros_List_RShift(PyrosList **pList, size_t shift, Pyros_Free_Callback cb) {
 	size_t i;
 
 	assert(pList != NULL);
@@ -140,10 +145,13 @@ Pyros_List_RShift(PyrosList **pList, size_t shift) {
 	if (shift >= (*pList)->length)
 		return PYROS_ERROR_INVALID_ARGUMENT;
 
-	for (i = 0; i < shift; i++)
-		free((*pList)->list[i]);
+	for (i = 0; i < shift; i++) {
+		if (cb != NULL)
+			cb((*pList)->list[i]);
+		(*pList)->list[i] = NULL;
+	}
 
-	(*pList)->list++;
+	(*pList)->list += shift;
 	(*pList)->length--;
 	(*pList)->offset++;
 

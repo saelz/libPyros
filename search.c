@@ -444,7 +444,7 @@ error:
 }
 
 PyrosList *
-Pyros_Search(PyrosDB *pyrosDB, char **rawTags, size_t tagc) {
+Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 	char *cmd = NULL;
 	char *tag;
 

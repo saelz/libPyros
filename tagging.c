@@ -47,6 +47,11 @@ static enum PYROS_ERROR appendStructuredTags(PyrosDB *pyrosDB,
                                              size_t *last_len, int current,
                                              int relation_type, int parent_pos);
 
+static PyrosList *getRelatedTagIds(PyrosDB *pyrosDB, int64_t *tag, int type1,
+                                   int type2);
+static PyrosList *GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
+                                 PyrosList *(*getRelatedIds)());
+
 int64_t
 Pyros_Get_Tag_Count(PyrosDB *pyrosDB) {
 	int64_t filecount = -1;
@@ -210,10 +215,9 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 	for (i = 0; i < tagids->length; i++) {
 
 		if (flags & PYROS_GLOB)
-			parent_pos = i+1;
+			parent_pos = i + 1;
 		else
 			parent_pos = i;
-
 
 		if (flags & PYROS_ALIAS)
 			if (appendStructuredTags(
@@ -295,7 +299,7 @@ Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
 		goto error;
 
 	if (mergeTagidsIntoPyrosTagList(pyrosDB, tagids, structured_tags,
-									tag) != PYROS_OK)
+	                                tag) != PYROS_OK)
 		goto error;
 
 	Pyros_List_Free(tagids, free);
@@ -531,7 +535,8 @@ Pyros_Remove_All_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
 }
 
 enum PYROS_ERROR
-Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[], size_t tagc) {
+Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, const char *tags[],
+              size_t tagc) {
 	size_t i;
 	char *tag = NULL;
 	int is_anti_tag = FALSE;
@@ -716,7 +721,7 @@ Pyros_Get_Tags_From_Hash(PyrosDB *pyrosDB, const char *hash) {
 	return structured_tags;
 }
 
-PyrosList *
+static PyrosList *
 getRelatedTagIds(PyrosDB *pyrosDB, int64_t *tag, int type1, int type2) {
 	PyrosList *pList = NULL, *pList2;
 
@@ -806,7 +811,7 @@ error:
 	return NULL;
 }
 
-PyrosList *
+static PyrosList *
 GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
                PyrosList *(*getRelatedIds)()) {
 	PyrosList *relatedTags = Pyros_Create_List(1);
@@ -851,7 +856,7 @@ GetRelatedTags(PyrosDB *pyrosDB, const char *tag,
 	cmdlength = strlen("SELECT tag FROM tag WHERE id IN ()") + 1 +
 	            (relatedTags->length * 2);
 
-	Pyros_List_RShift(&relatedTags, 1);
+	Pyros_List_RShift(&relatedTags, 1, free);
 
 	cmd = malloc(sizeof(*cmd) * cmdlength);
 
@@ -959,5 +964,6 @@ Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2) {
 	if (tags == NULL)
 		return pyrosDB->error;
 
-	return Pyros_Add_Tag(pyrosDB, hash2, (char **)tags->list, tags->length);
+	return Pyros_Add_Tag(pyrosDB, hash2, (const char **)tags->list,
+	                     tags->length);
 }

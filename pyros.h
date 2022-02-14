@@ -69,7 +69,7 @@ static const char PYROS_SEARCH_KEYWORDS[][9] = {
     "limit", "page", "explicit", "ext", "tagcount", "mime", "hash", "order"};
 
 /* Database functions */
-PyrosDB *Pyros_Alloc_Database(char *path);
+PyrosDB *Pyros_Alloc_Database(const char *path);
 enum PYROS_ERROR Pyros_Create_Database(PyrosDB *pyrosDB,
                                        enum PYROS_HASHTYPE hashtype);
 enum PYROS_ERROR Pyros_Open_Database(PyrosDB *pyrosDB);
@@ -86,23 +86,23 @@ void Pyros_Clear_Error(PyrosDB *pyrosDB);
 
 /* PyrosFile functions */
 void Pyros_Free_File(PyrosFile *pFile);
-PyrosFile *Pyros_Duplicate_File(PyrosFile *pFile);
+PyrosFile *Pyros_Duplicate_File(const PyrosFile *pFile);
 
 /* returns hash of file */
 char *Pyros_Add(PyrosDB *pyrosDB, const char *file);
 /* returns list of file hashes  */
-PyrosList *Pyros_Add_Full(PyrosDB *pyrosDB, char *filePaths[], size_t filec,
-                          char *tags[], size_t tagc, int useTagfile,
-                          int returnHashes, Pyros_Add_Full_Callback,
-                          void *callback_data);
-enum PYROS_ERROR Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, char *tags[],
-                               size_t tagc);
+PyrosList *Pyros_Add_Full(PyrosDB *pyrosDB, const char *filePaths[],
+                          size_t filec, const char *tags[], size_t tagc,
+                          int useTagfile, int returnHashes,
+                          Pyros_Add_Full_Callback, void *callback_data);
+enum PYROS_ERROR Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash,
+                               const char *tags[], size_t tagc);
 
 /* PyrosTag functions */
 void Pyros_Free_Tag(PyrosTag *tag);
 
 /* query functions*/
-PyrosList *Pyros_Search(PyrosDB *pyrosDB, char **tags, size_t tagc);
+PyrosList *Pyros_Search(PyrosDB *pyrosDB, const char **tags, size_t tagc);
 PyrosList *Pyros_Get_All_Hashes(PyrosDB *pyrosDB);
 PyrosList *Pyros_Get_All_Tags(PyrosDB *pyrosDB);
 
@@ -162,9 +162,10 @@ enum PYROS_ERROR Pyros_List_Shrink(PyrosList *pList);
 
 enum PYROS_ERROR Pyros_List_Grow(PyrosList *pList, size_t requested_len);
 
-enum PYROS_ERROR Pyros_List_Append(PyrosList *pList, void *ptr);
+enum PYROS_ERROR Pyros_List_Append(PyrosList *pList, const void *ptr);
 
-enum PYROS_ERROR Pyros_List_RShift(PyrosList **pList, size_t shift);
+enum PYROS_ERROR Pyros_List_RShift(PyrosList **pList, size_t shift,
+                                   Pyros_Free_Callback cb);
 
 #ifdef __cplusplus
 }
