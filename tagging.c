@@ -461,7 +461,7 @@ addTagRelation(PyrosDB *pyrosDB, int type, const char *orig_tag1,
 		} else {
 			if (type == TAG_TYPE_CHILD)
 				type = TAG_TYPE_PARENT;
-			else if (type == TAG_TYPE_CHILD)
+			else if (type == TAG_TYPE_PARENT)
 				type = TAG_TYPE_CHILD;
 
 			if (Pyros_Add_Relation(pyrosDB, tag2, tag1, type) !=
@@ -920,7 +920,7 @@ Pyros_Remove_Tag_Relationship(PyrosDB *pyrosDB, const char *tag1,
 		return pyrosDB->error;
 
 	cmp = strcmp(tag2, tag1);
-	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp != 0)
+	if (tag1[0] != '\0' && tag2[0] != '\0' && cmp == 0)
 		return PYROS_OK;
 
 	if (cmp > 0)
