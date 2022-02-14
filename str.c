@@ -119,9 +119,8 @@ getFilePath(PyrosDB *pyrosDB, const char *hash, const char *ext) {
 
 int
 containsGlobChar(const char *str) {
-	size_t i;
-	for (i = 0; i < strlen(str); i++) {
-		switch (str[i]) {
+	while (*str != '\0') {
+		switch (*str) {
 		case '^':
 		case ']':
 		case '[':
@@ -129,6 +128,7 @@ containsGlobChar(const char *str) {
 		case '?':
 			return TRUE;
 		}
+		str++;
 	}
 	return FALSE;
 }

@@ -195,7 +195,7 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 		tag = newPyrosTag(FALSE, -1);
 		if (tag == NULL)
 			goto error_oom;
-		Pyros_List_Append(structured_tags, newPyrosTag(FALSE, 0));
+		Pyros_List_Append(structured_tags, tag);
 	}
 
 	for (i = 0; i < tagids->length; i++) {
@@ -208,10 +208,12 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 	lastlength = tagids->length;
 
 	for (i = 0; i < tagids->length; i++) {
-		parent_pos = i;
 
 		if (flags & PYROS_GLOB)
-			parent_pos++;
+			parent_pos = i+1;
+		else
+			parent_pos = i;
+
 
 		if (flags & PYROS_ALIAS)
 			if (appendStructuredTags(
@@ -261,6 +263,7 @@ Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
 
 	if ((flags & PYROS_GLOB) && containsGlobChar(tag)) {
 		tagids = getTagIdByGlob(pyrosDB, tag);
+
 		if (tagids == NULL)
 			goto error;
 	} else {
@@ -283,7 +286,7 @@ Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
 				goto error;
 			}
 		} else {
-			return tagids;
+			return tagids; /* return empty list */
 		}
 	}
 
@@ -292,7 +295,7 @@ Pyros_Get_Related_Tags(PyrosDB *pyrosDB, const char *orig_tag,
 		goto error;
 
 	if (mergeTagidsIntoPyrosTagList(pyrosDB, tagids, structured_tags,
-	                                NULL) != PYROS_OK)
+									tag) != PYROS_OK)
 		goto error;
 
 	Pyros_List_Free(tagids, free);
