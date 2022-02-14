@@ -41,6 +41,11 @@ static enum PYROS_ERROR Pyros_Add_Relation(PyrosDB *pyrosDB, const char *tag1,
                                            const char *tag2, int type);
 
 static PyrosList *getTagsFromTagIdList(PyrosDB *pyrosDB, PyrosList *tagids);
+static enum PYROS_ERROR appendStructuredTags(PyrosDB *pyrosDB,
+                                             PyrosList *structured_tags,
+                                             PyrosList *tagids,
+                                             size_t *last_len, int current,
+                                             int relation_type, int parent_pos);
 
 int64_t
 Pyros_Get_Tag_Count(PyrosDB *pyrosDB) {
@@ -124,12 +129,60 @@ error:
 	return pyrosDB->error;
 }
 
+static enum PYROS_ERROR
+appendStructuredTags(PyrosDB *pyrosDB, PyrosList *structured_tags,
+                     PyrosList *tagids, size_t *last_len, int current,
+                     int relation_type, int parent_pos) {
+	PyrosTag *tag;
+	PyrosList *related_tags;
+
+	switch (relation_type) {
+	case PYROS_CHILD:
+		related_tags = Get_Children_Ids(pyrosDB, tagids->list[current]);
+		break;
+	case PYROS_ALIAS:
+		related_tags = Get_Aliased_Ids(pyrosDB, tagids->list[current]);
+		break;
+	case PYROS_PARENT:
+		related_tags = Get_Parent_Ids(pyrosDB, tagids->list[current]);
+		break;
+	default:
+		return PYROS_OK;
+	}
+
+	if (related_tags == NULL)
+		goto error;
+
+	if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
+		Pyros_List_Free(related_tags,
+		                (Pyros_Free_Callback)Pyros_Free_Tag);
+		goto error_oom;
+	}
+	for (; *last_len < tagids->length; (*last_len)++) {
+		tag = newPyrosTag(relation_type == PYROS_ALIAS, parent_pos);
+		if (tag == NULL)
+			goto error_oom;
+
+		if (Pyros_List_Append(structured_tags, tag) != PYROS_OK) {
+			free(tag);
+			goto error_oom;
+		}
+	}
+
+	return PYROS_OK;
+error_oom:
+	return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
+error:
+	return pyrosDB->error;
+}
+
 static PyrosList *
 getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
-	PyrosList *structured_tags, *related_tags;
+	PyrosList *structured_tags;
 	PyrosTag *tag;
 	size_t i;
 	size_t lastlength;
+	size_t parent_pos;
 
 	structured_tags = Pyros_Create_List(tagids->length + 1);
 	if (structured_tags == NULL)
@@ -155,80 +208,28 @@ getStructuredTags(PyrosDB *pyrosDB, PyrosList *tagids, unsigned int flags) {
 	lastlength = tagids->length;
 
 	for (i = 0; i < tagids->length; i++) {
-		size_t parent_pos = i;
+		parent_pos = i;
+
 		if (flags & PYROS_GLOB)
 			parent_pos++;
 
-		if (flags & PYROS_ALIAS) {
-			related_tags =
-			    Get_Aliased_Ids(pyrosDB, tagids->list[i]);
-			if (related_tags == NULL)
+		if (flags & PYROS_ALIAS)
+			if (appendStructuredTags(
+			        pyrosDB, structured_tags, tagids, &lastlength,
+			        i, PYROS_ALIAS, parent_pos) != PYROS_OK)
 				goto error;
-			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
-				Pyros_List_Free(
-				    related_tags,
-				    (Pyros_Free_Callback)Pyros_Free_Tag);
-				goto error_oom;
-			}
-			for (; lastlength < tagids->length; lastlength++) {
-				tag = newPyrosTag(flags & TRUE, parent_pos);
-				if (tag == NULL)
-					goto error_oom;
 
-				if (Pyros_List_Append(structured_tags, tag) !=
-				    PYROS_OK) {
-					free(tag);
-					goto error_oom;
-				}
-			}
-		}
-
-		if (flags & PYROS_CHILD) {
-			related_tags =
-			    Get_Children_Ids(pyrosDB, tagids->list[i]);
-			if (related_tags == NULL)
+		if (flags & PYROS_CHILD)
+			if (appendStructuredTags(
+			        pyrosDB, structured_tags, tagids, &lastlength,
+			        i, PYROS_CHILD, parent_pos) != PYROS_OK)
 				goto error;
-			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
-				Pyros_List_Free(
-				    related_tags,
-				    (Pyros_Free_Callback)Pyros_Free_Tag);
-				goto error_oom;
-			}
-			for (; lastlength < tagids->length; lastlength++) {
-				tag = newPyrosTag(flags & FALSE, parent_pos);
-				if (tag == NULL)
-					goto error_oom;
 
-				if (Pyros_List_Append(structured_tags, tag) !=
-				    PYROS_OK) {
-					free(tag);
-					goto error_oom;
-				}
-			}
-		}
-
-		if (flags & PYROS_PARENT) {
-			related_tags = Get_Parent_Ids(pyrosDB, tagids->list[i]);
-			if (related_tags == NULL)
+		if (flags & PYROS_PARENT)
+			if (appendStructuredTags(
+			        pyrosDB, structured_tags, tagids, &lastlength,
+			        i, PYROS_PARENT, parent_pos) != PYROS_OK)
 				goto error;
-			if (PyrosListMerge(tagids, related_tags) != PYROS_OK) {
-				Pyros_List_Free(
-				    related_tags,
-				    (Pyros_Free_Callback)Pyros_Free_Tag);
-				goto error_oom;
-			}
-			for (; lastlength < tagids->length; lastlength++) {
-				tag = newPyrosTag(flags & FALSE, parent_pos);
-				if (tag == NULL)
-					goto error_oom;
-
-				if (Pyros_List_Append(structured_tags, tag) !=
-				    PYROS_OK) {
-					free(tag);
-					goto error_oom;
-				}
-			}
-		}
 	}
 	return structured_tags;
 

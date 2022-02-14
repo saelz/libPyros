@@ -52,8 +52,8 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     "SELECT tag FROM tag;",
 
     // STMT_QUERY_TAG_BY_HASH
-    "SELECT tagid FROM tags WHERE hashid="
-    "(SELECT id FROM hashes WHERE hash=?) AND isantitag=0;",
+	"SELECT tagid FROM tags LEFT JOIN hashes ON tags.hashid = hashes.id WHERE "
+	"hash=? AND isantitag=0;",
 
     // STMT_QUERY_TAG_ID_BY_GLOB
     "SELECT id FROM tag WHERE tag GLOB LOWER(?);",
