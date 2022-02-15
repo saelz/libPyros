@@ -370,6 +370,8 @@ sqlBindList(sqlite3_stmt *stmt, PyrosList *pList, enum SQL_BIND_TYPE type) {
 	}
 }
 
+#include <stdio.h>
+
 void
 sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
             querySettings qSet) {
@@ -397,6 +399,7 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 			group_count++;
 			sqlite3_bind_text(stmt, pos, prcsTags[i].meta.text, -1,
 			                  NULL);
+			pos++;
 			break;
 		case TT_TAGCOUNT:
 			if (prcsTags[i].meta.stat.min ==
