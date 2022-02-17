@@ -111,8 +111,11 @@ getFilePath(PyrosDB *pyrosDB, const char *hash, const char *ext) {
 	strcpy(path, pyrosDB->path);
 	strcat(path, dbPath);
 	strcat(path, hash);
-	strcat(path, ".");
-	strcat(path, ext);
+
+	if (pyrosDB->preserve_ext && ext != NULL && ext[0] != '\0') {
+		strcat(path, ".");
+		strcat(path, ext);
+	}
 
 	return path;
 }
