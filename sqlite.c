@@ -109,7 +109,7 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     " AND id NOT IN (SELECT tagid FROM tags)",
 
     // STMT_VACUUM
-    "VACUUM"
+    "VACUUM",
 
     // STMT_ROLLBACK
     "ROLLBACK"};
