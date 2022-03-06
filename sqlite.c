@@ -240,6 +240,9 @@ sqlCreateTables(PyrosDB *pyrosDB) {
 	    "  FOREIGN KEY (masterfile_hash) REFERENCES hashes(hash)"
 	    "  ON DELETE CASCADE)"
 	    "WITHOUT ROWID;",
+
+	    /* create index for tags table */
+	    "CREATE UNIQUE INDEX idx_tags ON tags (hashid,tagid)",
 	};
 
 	for (i = 0; i < LENGTH(tablelist); i++) {

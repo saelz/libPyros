@@ -237,7 +237,7 @@ Pyros_Create_Database(PyrosDB *pyrosDB, enum PYROS_HASHTYPE hashtype) {
 
 	pathlen = strlen(pyrosDB->path);
 	dbpath = malloc(pathlen + strlen(DBFILE));
-	if (dbpath != NULL)
+	if (dbpath == NULL)
 		return setError(pyrosDB, PYROS_ERROR_OOM, "Out of memory");
 
 	/* makes entire path */
