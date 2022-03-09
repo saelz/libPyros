@@ -442,33 +442,55 @@ Pyros_Remove_File(PyrosDB *pyrosDB, PyrosFile *pFile) {
 enum PYROS_ERROR
 Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,
                    int copytags) {
+	PyrosFile *master_file = NULL;
+	PyrosFile *file2 = NULL;
+
 	assert(pyrosDB != NULL);
 	assert(masterHash != NULL);
 	assert(hash2 != NULL);
 	RETURN_IF_ERR(pyrosDB);
 
-	if (!strcmp(masterHash, hash2))
-		return PYROS_OK;
+	file2 = Pyros_Get_File_From_Hash(pyrosDB, hash2);
+	if (file2 == NULL)
+		goto error;
+
+	master_file = Pyros_Get_File_From_Hash(pyrosDB, hash2);
+	if (master_file == NULL)
+		goto error;
+
+	if (!strcmp(master_file->hash, file2->hash))
+		goto error; /* should return PYROS_OK */
 
 	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
-		return pyrosDB->error;
+		goto error;
 
-	if (copytags && Pyros_Copy_Tags(pyrosDB, hash2, masterHash) != PYROS_OK)
-		return pyrosDB->error;
+	if (copytags && Pyros_Copy_Tags(pyrosDB, file2->hash,
+	                                master_file->hash) != PYROS_OK)
+		goto error;
 
 	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_MERGE_HASH), TRUE,
-	            SQL_CHAR, masterHash, SQL_CHAR, hash2) != PYROS_OK)
-		return pyrosDB->error;
+	            SQL_CHAR, master_file->hash, SQL_CHAR,
+	            file2->hash) != PYROS_OK)
+		goto error;
 
-	if (Pyros_Remove_File(
-	        pyrosDB, Pyros_Get_File_From_Hash(pyrosDB, hash2)) != PYROS_OK)
-		return pyrosDB->error;
+	Pyros_Free_File(master_file);
 
 	/* if hash2 is a masterhash update all files merged with it to new
 	 * masterhash*/
 
-	return sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_UPDATE_MERGED), TRUE,
-	               SQL_CHAR, masterHash, SQL_CHAR, hash2);
+	if (sqlBind(pyrosDB, sqlGetStmt(pyrosDB, STMT_UPDATE_MERGED), TRUE,
+	            SQL_CHAR, masterHash, SQL_CHAR, file2->hash) != PYROS_OK) {
+		Pyros_Free_File(file2);
+		return pyrosDB->error;
+	}
+	if (Pyros_Remove_File(pyrosDB, file2) != PYROS_OK)
+		return pyrosDB->error;
+
+	return PYROS_OK;
+error:
+	Pyros_Free_File(file2);
+	Pyros_Free_File(master_file);
+	return pyrosDB->error;
 }
 
 void

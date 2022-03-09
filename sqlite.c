@@ -46,7 +46,8 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     "WHERE type=? AND tag2=?;",
 
     // STMT_QUERY_ALL_HASH
-    "SELECT hash FROM hashes;",
+    "SELECT hashes.hash FROM hashes UNION SELECT masterfile_hash FROM "
+    "merged_hashes",
 
     // STMT_QUERY_ALL_TAGS
     "SELECT tag FROM tag;",
@@ -62,8 +63,9 @@ static char *STMT_COMMAND[STMT_COUNT] = {
     "SELECT id FROM tag WHERE tag=LOWER(?);",
 
     // STMT_QUERY_FILE_FROM_HASH
-    "SELECT hash,mimetype,ext,import_time,filesize "
-    "FROM hashes WHERE hash=LOWER(?);",
+    "SELECT hashes.hash,mimetype,ext,import_time,filesize FROM hashes LEFT "
+    "JOIN merged_hashes ON hashes.hash = merged_hashes.masterfile_hash WHERE "
+    "LOWER(?) IN (merged_hashes.hash,hashes.hash) LIMIT 1",
 
     // STMT_QUERY_HASH_COUNT
     "SELECT COUNT(1) FROM hashes",
@@ -380,14 +382,12 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
             querySettings qSet) {
 	size_t i, j;
 	size_t pos = 1;
-	int group_count = 0;
 
 	assert(stmt != NULL);
 
 	for (i = 0; i < tagc; i++) {
 		switch (prcsTags[i].type) {
 		case TT_NORMAL:
-			group_count++;
 			for (j = 0; j < prcsTags[i].meta.tags->length; j++) {
 				sqlite3_bind_int64(
 				    stmt, pos,
@@ -397,9 +397,15 @@ sqlBindTags(sqlite3_stmt *stmt, PrcsTags *prcsTags, size_t tagc,
 			}
 			break;
 		case TT_HASH:
+			/* globbed hash filter requires 2 binds  */
+			if (containsGlobChar(prcsTags[i].meta.text)) {
+				sqlite3_bind_text(
+				    stmt, pos, prcsTags[i].meta.text, -1, NULL);
+				pos++;
+			}
+			/* fall through */
 		case TT_MIME:
 		case TT_EXT:
-			group_count++;
 			sqlite3_bind_text(stmt, pos, prcsTags[i].meta.text, -1,
 			                  NULL);
 			pos++;

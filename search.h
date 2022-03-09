@@ -47,6 +47,7 @@ typedef struct {
 	int pageSize;
 	int normal_group_count;
 	int meta_group_count;
+	int has_hash_filter;
 } querySettings;
 
 #endif
