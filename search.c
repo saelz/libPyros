@@ -18,6 +18,10 @@ static enum PYROS_ERROR catTagGroup(char **str, PrcsTags prcsTags,
 static enum PYROS_ERROR catStatGroup(char **str, PrcsTags prcsTags);
 static enum PYROS_ERROR catMetaGroup(char **str, PrcsTags prcsTags,
                                      char *label);
+static enum PYROS_ERROR catMetaQuery(char **str, PrcsTags prcsTags,
+                                     char *src_query_column,
+                                     char *return_column, char *table,
+                                     char *query_column);
 static void reorderProcessedTags(PrcsTags **prcsTags, size_t tag_count,
                                  querySettings *qSet);
 
@@ -298,6 +302,38 @@ catMetaGroup(char **str, PrcsTags prcsTags, char *label) {
 	return PYROS_OK;
 }
 
+static enum PYROS_ERROR
+catMetaQuery(char **str, PrcsTags prcsTags, char *src_query_column,
+             char *return_column, char *table, char *query_column) {
+	if (str_append(str, src_query_column) != PYROS_OK)
+		return PYROS_ERROR_OOM;
+
+	if (containsGlobChar(prcsTags.meta.text)) {
+		if (str_append(str, " GLOB  ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
+	} else {
+		if (str_append(str, "= ") != PYROS_OK)
+			return PYROS_ERROR_OOM;
+	}
+
+	if (str_append(str, "(SELECT ") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, return_column) != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, " FROM ") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, table) != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, " WHERE ? IN (") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, query_column) != PYROS_OK)
+		return PYROS_ERROR_OOM;
+	if (str_append(str, "))") != PYROS_OK)
+		return PYROS_ERROR_OOM;
+
+	return PYROS_OK;
+}
+
 static char *
 createSqlSearchCommand(PrcsTags *prcsTags, size_t tag_count,
                        querySettings *qSet) {
@@ -369,8 +405,10 @@ createSqlSearchCommand(PrcsTags *prcsTags, size_t tag_count,
 				break;
 
 			case TT_HASH:
-				if (catMetaGroup(&cmd, prcsTags[i], "hash") !=
-				    PYROS_OK)
+				if (catMetaQuery(
+				        &cmd, prcsTags[i], "hash",
+				        "masterfile_hash", "merged_hashes",
+				        "masterfile_hash,hash") != PYROS_OK)
 					goto error;
 				break;
 
