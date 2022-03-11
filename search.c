@@ -509,6 +509,9 @@ reorderProcessedTags(PrcsTags **prcsTags, size_t tagc, querySettings *qSet) {
 	}
 }
 
+#include <stdio.h>
+#include <time.h>
+
 PyrosList *
 Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 	char *cmd = NULL;
@@ -520,6 +523,9 @@ Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 	PyrosList *files;
 	sqlite3_stmt *Query_Hash_By_Tags;
 	PyrosList *tags = NULL;
+	clock_t start_time = clock() / (CLOCKS_PER_SEC / 1000);
+	clock_t last_time = start_time;
+	clock_t end_time;
 
 	assert(pyrosDB != NULL);
 	RETURN_IF_ERR_WRET(pyrosDB, NULL);
@@ -551,6 +557,9 @@ Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 			goto error_oom;
 		}
 	}
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "INITIALIZATION IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	prcsTags = ProcessTags(pyrosDB, tags, &qSet);
 
@@ -560,18 +569,34 @@ Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 		Pyros_List_Clear(tags, &free);
 		return tags; /* return empty list */
 	}
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "TAGS PROCESSED IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	reorderProcessedTags(&prcsTags, tags->length, &qSet);
 	cmd = createSqlSearchCommand(prcsTags, tags->length, &qSet);
 	if (cmd == NULL)
 		goto error_oom;
+	fprintf(stderr, "%s\n", cmd);
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "SQL STMT CREATED IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	if (sqlPrepareStmt(pyrosDB, cmd, &Query_Hash_By_Tags) != PYROS_OK)
 		goto error;
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "SQL STMT PREPARED IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	sqlBindTags(Query_Hash_By_Tags, prcsTags, tagc, qSet);
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "SQL STMT BINDED IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	files = sqlStmtGetAllFiles(pyrosDB, Query_Hash_By_Tags);
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "SQL DATA RETRIEVED IN:%ld\n", end_time - last_time);
+	last_time = end_time;
 
 	sqlite3_finalize(Query_Hash_By_Tags);
 
@@ -586,6 +611,8 @@ Pyros_Search(PyrosDB *pyrosDB, const char **rawTags, size_t tagc) {
 	free(cmd);
 	free(prcsTags);
 	Pyros_List_Free(tags, &free);
+	end_time = clock() / (CLOCKS_PER_SEC / 1000);
+	fprintf(stderr, "TOTAL:%ld\n", end_time - start_time);
 	return files;
 
 error_oom:

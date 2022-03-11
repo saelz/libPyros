@@ -95,7 +95,7 @@ Pyros_Add(PyrosDB *pyrosDB, const char *filePath) {
 	size_t filetime;
 	size_t filesize;
 	const char *fileext;
-	char *filehash;
+	char *filehash = NULL;
 	char *filepath = NULL;
 	char *filemime = NULL;
 
@@ -454,12 +454,12 @@ Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,
 	if (file2 == NULL)
 		goto error;
 
-	master_file = Pyros_Get_File_From_Hash(pyrosDB, hash2);
+	master_file = Pyros_Get_File_From_Hash(pyrosDB, masterHash);
 	if (master_file == NULL)
 		goto error;
 
 	if (!strcmp(master_file->hash, file2->hash))
-		goto error; /* should return PYROS_OK */
+		goto error; /* returns PYROS_OK */
 
 	if (sqlStartTransaction(pyrosDB) != PYROS_OK)
 		goto error;
