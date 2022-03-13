@@ -553,6 +553,8 @@ Pyros_Add_Tag(PyrosDB *pyrosDB, const char *hash, const char *tags[],
 		goto error;
 
 	for (i = 0; i < tagc; i++) {
+		if (tags[i] == NULL)
+			continue;
 		tag = str_remove_whitespace(tags[i]);
 		if (tag == NULL)
 			return setError(pyrosDB, PYROS_ERROR_OOM,
@@ -964,6 +966,7 @@ Pyros_Copy_Tags(PyrosDB *pyrosDB, const char *hash1, const char *hash2) {
 	if (tags == NULL)
 		return pyrosDB->error;
 
-	return Pyros_Add_Tag(pyrosDB, hash2, (const char **)tags->list,
-	                     tags->length);
+	Pyros_Add_Tag(pyrosDB, hash2, (const char **)tags->list, tags->length);
+	Pyros_List_Free(tags, free);
+	return pyrosDB->error;
 }

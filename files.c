@@ -486,6 +486,7 @@ Pyros_Merge_Hashes(PyrosDB *pyrosDB, const char *masterHash, const char *hash2,
 	if (Pyros_Remove_File(pyrosDB, file2) != PYROS_OK)
 		return pyrosDB->error;
 
+	Pyros_Free_File(file2);
 	return PYROS_OK;
 error:
 	Pyros_Free_File(file2);
