@@ -172,6 +172,7 @@ importTagsFromTagFile(PyrosDB *pyrosDB, const char *filepath,
 	char filebuf[FILEBUFSIZE];
 	FILE *tagFile = NULL;
 	char lastchar = '\0';
+	size_t read;
 
 	char *tagFilePath = NULL;
 
@@ -193,9 +194,19 @@ importTagsFromTagFile(PyrosDB *pyrosDB, const char *filepath,
 	if (tagbuffer == NULL)
 		goto error;
 
-	while (fgets(filebuf, FILEBUFSIZE, tagFile) != NULL) {
-		for (size_t i = 0; i < strlen(filebuf); i++) {
+	while ((read = fread(filebuf, sizeof(*filebuf), FILEBUFSIZE,
+	                     tagFile)) != 0) {
+		for (size_t i = 0; i < read; i++) {
 			lastchar = filebuf[i];
+
+			if (filebuf[i] == 0) {
+				/* file is not a text file*/
+				fclose(tagFile);
+				free(tagbuffer);
+				free(tagFilePath);
+				Pyros_List_Clear(tagFileTags, free);
+				return PYROS_OK;
+			}
 
 			if (filebuf[i] == '\n') {
 				tagbuffer[buf_index] = '\0';
