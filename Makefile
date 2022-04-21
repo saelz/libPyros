@@ -1,9 +1,10 @@
 WARNING +=-Wall -Werror -Wextra -Wdeclaration-after-statement -Wnull-dereference -Wmissing-prototypes -Wpointer-arith -Wcast-qual
 
 BUILD_NAME = libpyros.so
-LIBS =-lsqlite3 -lcrypto -lmagic
+PKG_CONFIG= libmagic libcrypto sqlite3
+LIBS =`pkg-config --libs $(PKG_CONFIG)`
 
-CFLAGS = $(WARNING) -std=c99 -fPIC -pedantic -g
+CFLAGS = $(WARNING) -std=c99 -fPIC -pedantic -g `pkg-config --cflags $(PKG_CONFIG)`
 
 LDFLAGS = $(LIBS) -shared
 
